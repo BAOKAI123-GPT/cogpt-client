@@ -1,0 +1,12 @@
+node_modules/
+dist/
+out/
+.env
+.env.*
+*.log
+.DS_Store
+.vscode/
+*.local
+
+# 内部文档（含密钥，禁止入库）
+docs/

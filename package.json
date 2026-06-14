@@ -1,0 +1,50 @@
+{
+  "name": "cogpt",
+  "version": "0.1.0",
+  "description": "Co-GPT — 对话即创作的 AI 生图工作台",
+  "main": "./out/main/index.js",
+  "author": "Co-GPT",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BAOKAI123-GPT/cogpt-client.git"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "build": "electron-vite build",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "build:win": "electron-vite build && electron-builder --win",
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:unpack": "electron-vite build && electron-builder --dir"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.1",
+    "@electron-toolkit/utils": "^3.0.0",
+    "@neplex/vectorizer": "^0.1.0",
+    "electron-store": "^8.2.0",
+    "lucide-react": "^0.408.0",
+    "sharp": "^0.33.4",
+    "zustand": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "electron": "^31.2.1",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "konva": "^9.3.14",
+    "postcss": "^8.4.39",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-konva": "^18.2.10",
+    "tailwindcss": "^3.4.6",
+    "typescript": "^5.5.3",
+    "vite": "^5.3.3"
+  }
+}
