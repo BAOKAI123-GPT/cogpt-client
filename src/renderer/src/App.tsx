@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { MessageSquareText, Wrench, Pencil, Settings as SettingsIcon, Sparkles, Crown } from 'lucide-react'
 import { useApp, type View } from './store/app'
 import { Membership } from './components/Membership'
+import { UpdateModal } from './components/UpdateModal'
 import { LoginView } from './views/LoginView'
 import { ChatView } from './views/ChatView'
 import { ResourceLibrary } from './views/ResourceLibrary'
@@ -23,11 +24,15 @@ export default function App(): JSX.Element {
   const init = useApp((s) => s.init)
   const needRecharge = useApp((s) => s.needRecharge)
   const setNeedRecharge = useApp((s) => s.setNeedRecharge)
+  const update = useApp((s) => s.update)
+  const dismissUpdate = useApp((s) => s.dismissUpdate)
   const [showMember, setShowMember] = useState(false)
 
   useEffect(() => {
     init()
   }, [init])
+
+  const updateModal = update ? <UpdateModal info={update} onClose={dismissUpdate} /> : null
 
   useEffect(() => {
     if (needRecharge) {
@@ -36,8 +41,20 @@ export default function App(): JSX.Element {
     }
   }, [needRecharge, setNeedRecharge])
 
-  if (!ready) return <div className="h-full grid place-items-center text-gray-500">正在启动 Co-GPT…</div>
-  if (!account) return <LoginView />
+  if (!ready)
+    return (
+      <>
+        {updateModal}
+        <div className="h-full grid place-items-center text-gray-500">正在启动 Co-GPT…</div>
+      </>
+    )
+  if (!account)
+    return (
+      <>
+        {updateModal}
+        <LoginView />
+      </>
+    )
 
   const q = account.quota
   const creditLabel = q.memberActive ? `${q.memberCredits} 次` : `免费 ${q.freeRemaining}/${q.freeDaily}`
@@ -95,6 +112,7 @@ export default function App(): JSX.Element {
       </div>
 
       {showMember && <Membership onClose={() => setShowMember(false)} />}
+      {updateModal}
     </div>
   )
 }

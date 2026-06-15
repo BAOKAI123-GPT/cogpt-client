@@ -20,7 +20,9 @@ import {
   RATIOS,
   QUALITIES,
   DEFAULT_RATIO,
-  DEFAULT_QUALITY
+  DEFAULT_QUALITY,
+  ratioSupported,
+  modelSupportsAnyRatio
 } from '../lib/genOptions'
 
 const SUGGESTIONS = [
@@ -95,6 +97,11 @@ export function ChatView(): JSX.Element {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, generating])
+
+  // 切换模型后，若当前比例该模型不支持，自动回退到方形，避免选了出不了的比例
+  useEffect(() => {
+    if (selectedModel && !ratioSupported(selectedModel, ratio)) setRatio(DEFAULT_RATIO)
+  }, [selectedModel, ratio])
 
   function addRefs(urls: string[]): void {
     if (urls.length) setRefs((prev) => [...prev, ...urls].slice(0, 6))
@@ -246,7 +253,7 @@ export function ChatView(): JSX.Element {
             <button className="btn-soft py-1.5 px-2.5 text-xs" onClick={pickRefs}>
               <ImagePlus size={14} /> 参考图
             </button>
-            <RatioPicker value={ratio} onChange={setRatio} />
+            <RatioPicker value={ratio} model={selectedModel} onChange={setRatio} />
             <QualityPicker value={quality} onChange={setQuality} />
             {models.length > 1 && (
               <select
@@ -315,10 +322,19 @@ export function ChatView(): JSX.Element {
   )
 }
 
-// 比例选择
-function RatioPicker({ value, onChange }: { value: string; onChange: (v: string) => void }): JSX.Element {
+// 比例选择（不支持的比例按当前模型禁用）
+function RatioPicker({
+  value,
+  model,
+  onChange
+}: {
+  value: string
+  model: string
+  onChange: (v: string) => void
+}): JSX.Element {
   const [open, setOpen] = useState(false)
   const cur = RATIOS.find((r) => r.key === value) ?? RATIOS[0]
+  const anyRatio = modelSupportsAnyRatio(model)
   return (
     <div className="relative">
       <button
@@ -332,24 +348,39 @@ function RatioPicker({ value, onChange }: { value: string; onChange: (v: string)
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute bottom-full mb-1.5 z-20 card p-2 w-56 shadow-2xl">
+            {!anyRatio && (
+              <div className="text-[10px] text-amber-300/80 px-1 mb-1.5 leading-snug">
+                当前模型仅支持 3 种比例。需要 9:16 等更多比例，请把模型切到「高质量」。
+              </div>
+            )}
             {(['方形', '竖版', '横版'] as const).map((g) => (
               <div key={g} className="mb-1.5 last:mb-0">
                 <div className="text-[10px] text-gray-500 px-1 mb-1">{g}</div>
                 <div className="flex flex-wrap gap-1">
-                  {RATIOS.filter((r) => r.group === g).map((r) => (
-                    <button
-                      key={r.key}
-                      onClick={() => {
-                        onChange(r.key)
-                        setOpen(false)
-                      }}
-                      className={`px-2 py-1 rounded text-xs ${
-                        r.key === value ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'
-                      }`}
-                    >
-                      {r.key}
-                    </button>
-                  ))}
+                  {RATIOS.filter((r) => r.group === g).map((r) => {
+                    const ok = ratioSupported(model, r.key)
+                    return (
+                      <button
+                        key={r.key}
+                        disabled={!ok}
+                        title={ok ? '' : '当前模型不支持该比例'}
+                        onClick={() => {
+                          if (!ok) return
+                          onChange(r.key)
+                          setOpen(false)
+                        }}
+                        className={`px-2 py-1 rounded text-xs ${
+                          !ok
+                            ? 'opacity-30 line-through cursor-not-allowed bg-white/5'
+                            : r.key === value
+                              ? 'bg-brand text-white'
+                              : 'bg-white/5 hover:bg-white/10'
+                        }`}
+                      >
+                        {r.key}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             ))}

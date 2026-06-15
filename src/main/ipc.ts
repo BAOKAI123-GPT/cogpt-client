@@ -21,6 +21,9 @@ const MIME_BY_EXT: Record<string, string> = {
 }
 
 export function registerIpc(): void {
+  // ---- 应用 ----
+  ipcMain.handle('app:getVersion', () => app.getVersion())
+
   // ---- 配置 ----
   ipcMain.handle('config:getProfiles', () => configStore.getProfiles())
   ipcMain.handle('config:saveProfile', (_e, input: RelayProfileInput) =>

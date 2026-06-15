@@ -68,5 +68,9 @@ export const api = {
   payStatus: (
     outTradeNo: string
   ): Promise<{ ok: boolean; data: { status?: string; paid?: boolean; error?: string } }> =>
-    req('/api/pay/status?outTradeNo=' + encodeURIComponent(outTradeNo))
+    req('/api/pay/status?outTradeNo=' + encodeURIComponent(outTradeNo)),
+  appVersion: (): Promise<{
+    ok: boolean
+    data: { version?: string; url?: string; notes?: string; force?: boolean }
+  }> => req('/api/app-version')
 }

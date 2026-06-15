@@ -1,24 +1,42 @@
-// 比例与画质预设，以及把它们换算成「发给模型的尺寸」和「本地高清化的目标尺寸」。
+// 比例与画质预设。
 //
-// 现实约束：gpt-image 类模型只支持三种尺寸（1024×1024 / 1024×1536 / 1536×1024），
-// 即只有 1:1 / 2:3 / 3:2 三种原生比例，没有 3:4、9:16 等。
-// 因此只提供这三种「所见即所得」的比例，绝不再裁切内容；
-// 高清化只用 Lanczos 按长边等比放大（本地免费、不依赖中转站，可用于打印），不裁、不变形。
+// 关键事实（实测中转站）：
+//  - gpt-image-2 / gpt-image-2-all 支持「任意比例」——直接把目标尺寸发给模型，模型返回对应比例的真图。
+//  - gpt-image-1 / 1.5 / mini 等只支持 1024×1024 / 1024×1536 / 1536×1024 三种（1:1 / 2:3 / 3:2）。
+// 因此：按所选模型的能力开放比例；模型出不了的比例直接禁选。
+// **永不本地裁切**：模型出多大比例就是多大；高清化只用 Lanczos 按长边等比放大（不裁、不变形）。
 
 export interface RatioOption {
   key: string
   label: string
-  w: number
-  h: number
+  size: string // 直接发给模型的尺寸（gpt-image-2 会按此比例出图）
   group: '方形' | '竖版' | '横版'
 }
 
-// 只保留 gpt-image 原生支持的三种比例，避免本地裁切导致内容缺失。
 export const RATIOS: RatioOption[] = [
-  { key: '1:1', label: '1:1 方形', w: 1, h: 1, group: '方形' },
-  { key: '2:3', label: '2:3 竖版', w: 2, h: 3, group: '竖版' },
-  { key: '3:2', label: '3:2 横版', w: 3, h: 2, group: '横版' }
+  { key: '1:1', label: '1:1 方形', size: '1024x1024', group: '方形' },
+  { key: '4:5', label: '4:5 竖', size: '1024x1280', group: '竖版' },
+  { key: '3:4', label: '3:4 竖', size: '1080x1440', group: '竖版' },
+  { key: '2:3', label: '2:3 竖', size: '1024x1536', group: '竖版' },
+  { key: '9:16', label: '9:16 竖', size: '1080x1920', group: '竖版' },
+  { key: '5:4', label: '5:4 横', size: '1280x1024', group: '横版' },
+  { key: '4:3', label: '4:3 横', size: '1440x1080', group: '横版' },
+  { key: '3:2', label: '3:2 横', size: '1536x1024', group: '横版' },
+  { key: '16:9', label: '16:9 横', size: '1920x1080', group: '横版' }
 ]
+
+// 严格模型只支持的三种原生比例
+const STRICT_RATIOS = ['1:1', '2:3', '3:2']
+
+/** 该模型是否支持任意比例（gpt-image-2 系列支持） */
+export function modelSupportsAnyRatio(model: string): boolean {
+  return /gpt-image-2/i.test(model || '')
+}
+
+/** 某模型是否支持某比例 */
+export function ratioSupported(model: string, ratioKey: string): boolean {
+  return modelSupportsAnyRatio(model) || STRICT_RATIOS.includes(ratioKey)
+}
 
 export interface QualityOption {
   key: string
@@ -44,33 +62,12 @@ function qualityByKey(key: string): QualityOption {
   return QUALITIES.find((q) => q.key === key) ?? QUALITIES[1]
 }
 
-/** 选最接近的模型可用尺寸 */
+/** 该比例直接发给模型的尺寸 */
 export function modelSizeFor(ratioKey: string): string {
-  const r = ratioByKey(ratioKey)
-  if (r.w === r.h) return '1024x1024'
-  return r.w > r.h ? '1536x1024' : '1024x1536'
+  return ratioByKey(ratioKey).size
 }
 
 /** 画质对应的长边像素（本地等比放大用，不裁切） */
 export function qualityLongEdge(qualityKey: string): number {
   return qualityByKey(qualityKey).longEdge
-}
-
-/** 目标高清尺寸（按比例 × 画质长边） */
-export function finalSizeFor(ratioKey: string, qualityKey: string): { width: number; height: number } {
-  const r = ratioByKey(ratioKey)
-  const long = qualityByKey(qualityKey).longEdge
-  let width: number
-  let height: number
-  if (r.w === r.h) {
-    width = height = long
-  } else if (r.w > r.h) {
-    width = long
-    height = Math.round((long * r.h) / r.w)
-  } else {
-    height = long
-    width = Math.round((long * r.w) / r.h)
-  }
-  // 取偶数，避免某些编码器报错
-  return { width: width - (width % 2), height: height - (height % 2) }
 }

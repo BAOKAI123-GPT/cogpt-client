@@ -11,6 +11,27 @@ interface Account {
   quota: Quota
 }
 
+export interface UpdateInfo {
+  version: string
+  current: string
+  url: string
+  notes: string
+  force: boolean
+}
+
+// 简单语义化版本比较：latest 是否比 current 新
+function isNewer(latest: string, current: string): boolean {
+  const a = String(latest).split('.').map((n) => parseInt(n, 10) || 0)
+  const b = String(current).split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < 3; i++) {
+    const x = a[i] || 0
+    const y = b[i] || 0
+    if (x > y) return true
+    if (x < y) return false
+  }
+  return false
+}
+
 interface AppStore {
   ready: boolean
   account: Account | null
@@ -25,8 +46,11 @@ interface AppStore {
   genStatus: string
   needRecharge: boolean
   editorImage?: string
+  update: UpdateInfo | null
 
   init: () => Promise<void>
+  checkUpdate: () => Promise<void>
+  dismissUpdate: () => void
   sendCode: (phone: string) => Promise<{ ok: boolean; error?: string }>
   loginWithCode: (phone: string, code: string) => Promise<{ ok: boolean; error?: string }>
   logout: () => void
@@ -58,8 +82,31 @@ export const useApp = create<AppStore>((set, get) => ({
   genStatus: '',
   needRecharge: false,
   editorImage: undefined,
+  update: null,
+
+  async checkUpdate() {
+    try {
+      const cur = await window.api.app.getVersion()
+      const r = await api.appVersion()
+      if (r.ok && r.data.version && isNewer(r.data.version, cur)) {
+        set({
+          update: {
+            version: r.data.version,
+            current: cur,
+            url: r.data.url || 'https://cogpt.art/download',
+            notes: r.data.notes || '',
+            force: !!r.data.force
+          }
+        })
+      }
+    } catch {
+      /* 离线/接口异常则不打扰 */
+    }
+  },
+  dismissUpdate: () => set({ update: null }),
 
   async init() {
+    void get().checkUpdate()
     const settings = await window.api.config.getSettings()
     const saved = localStorage.getItem(TOKEN_KEY)
     if (saved) {

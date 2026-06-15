@@ -15,6 +15,9 @@ import type {
 
 // 暴露给渲染进程的安全 API（window.api）
 const api = {
+  app: {
+    getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion')
+  },
   config: {
     getProfiles: (): Promise<RelayProfile[]> => ipcRenderer.invoke('config:getProfiles'),
     saveProfile: (input: RelayProfileInput): Promise<RelayProfile> =>
