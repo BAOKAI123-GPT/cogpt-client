@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { MessageSquareText, Wrench, Pencil, Settings as SettingsIcon, Sparkles, Crown } from 'lucide-react'
+import { MessageSquareText, Wrench, Pencil, Settings as SettingsIcon, Sparkles, Crown, History, Plus } from 'lucide-react'
 import { useApp, type View } from './store/app'
 import { Membership } from './components/Membership'
+import { ConversationDrawer } from './components/ConversationDrawer'
 import { UpdateModal } from './components/UpdateModal'
 import { LoginView } from './views/LoginView'
 import { ChatView } from './views/ChatView'
@@ -26,6 +27,8 @@ export default function App(): JSX.Element {
   const setNeedRecharge = useApp((s) => s.setNeedRecharge)
   const update = useApp((s) => s.update)
   const dismissUpdate = useApp((s) => s.dismissUpdate)
+  const setHistoryOpen = useApp((s) => s.setHistoryOpen)
+  const newConversation = useApp((s) => s.newConversation)
   const [showMember, setShowMember] = useState(false)
 
   useEffect(() => {
@@ -88,14 +91,28 @@ export default function App(): JSX.Element {
       </nav>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 shrink-0 border-b border-white/5 flex items-center justify-between px-4">
-          <div className="text-sm text-gray-300">
+        <header className="h-14 shrink-0 border-b border-white/5 flex items-center gap-2 px-4">
+          <button
+            title="历史对话"
+            onClick={() => setHistoryOpen(true)}
+            className="w-8 h-8 grid place-items-center rounded-lg text-gray-300 hover:bg-white/10"
+          >
+            <History size={18} />
+          </button>
+          <button
+            title="新对话"
+            onClick={() => newConversation()}
+            className="w-8 h-8 grid place-items-center rounded-lg text-gray-300 hover:bg-white/10"
+          >
+            <Plus size={18} />
+          </button>
+          <div className="text-sm text-gray-300 ml-1">
             {account.phone}
             {q.memberActive && <span className="ml-2 text-[10px] text-amber-300">会员 · {q.memberTier}</span>}
           </div>
           <button
             onClick={() => setShowMember(true)}
-            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-white transition-transform hover:scale-[1.03]"
+            className="ml-auto flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-white transition-transform hover:scale-[1.03]"
             style={{ background: 'linear-gradient(120deg,#7b5cff,#b06cff)' }}
             title="会员中心 / 充值"
           >
@@ -112,6 +129,7 @@ export default function App(): JSX.Element {
       </div>
 
       {showMember && <Membership onClose={() => setShowMember(false)} />}
+      <ConversationDrawer />
       {updateModal}
     </div>
   )

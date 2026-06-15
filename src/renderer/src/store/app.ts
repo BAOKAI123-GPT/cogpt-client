@@ -32,6 +32,36 @@ function isNewer(latest: string, current: string): boolean {
   return false
 }
 
+export interface ConvMeta {
+  id: string
+  title: string
+  at: number
+}
+const uid = (): string => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'c' + Date.now() + Math.random().toString(36).slice(2))
+
+// 对话本地存储（IndexedDB，Electron 渲染层可用；按设备保存，零服务器成本）
+function openConvDB(): Promise<IDBDatabase> {
+  return new Promise((res, rej) => {
+    try {
+      const r = indexedDB.open('cogpt', 1)
+      r.onupgradeneeded = () => { const db = r.result; if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' }); if (!db.objectStoreNames.contains('full')) db.createObjectStore('full', { keyPath: 'id' }) }
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error)
+    } catch (e) { rej(e) }
+  })
+}
+async function convSave(c: { id: string; title: string; at: number; msgs: ChatMessage[] }): Promise<void> {
+  try { const db = await openConvDB(); await new Promise((res) => { const tx = db.transaction(['meta', 'full'], 'readwrite'); tx.objectStore('meta').put({ id: c.id, title: c.title, at: c.at }); tx.objectStore('full').put({ id: c.id, msgs: c.msgs }); tx.oncomplete = () => res(null); tx.onerror = () => res(null) }) } catch { /* ignore */ }
+}
+async function convMetas(): Promise<ConvMeta[]> {
+  try { const db = await openConvDB(); return await new Promise((res) => { const tx = db.transaction('meta', 'readonly'); const rq = tx.objectStore('meta').getAll(); rq.onsuccess = () => res((rq.result || []).sort((a: ConvMeta, b: ConvMeta) => b.at - a.at)); rq.onerror = () => res([]) }) } catch { return [] }
+}
+async function convLoad(id: string): Promise<ChatMessage[]> {
+  try { const db = await openConvDB(); return await new Promise((res) => { const tx = db.transaction('full', 'readonly'); const rq = tx.objectStore('full').get(id); rq.onsuccess = () => res(rq.result ? rq.result.msgs : []); rq.onerror = () => res([]) }) } catch { return [] }
+}
+async function convDel(id: string): Promise<void> {
+  try { const db = await openConvDB(); await new Promise((res) => { const tx = db.transaction(['meta', 'full'], 'readwrite'); tx.objectStore('meta').delete(id); tx.objectStore('full').delete(id); tx.oncomplete = () => res(null); tx.onerror = () => res(null) }) } catch { /* ignore */ }
+}
+
 interface AppStore {
   ready: boolean
   account: Account | null
@@ -47,6 +77,17 @@ interface AppStore {
   needRecharge: boolean
   editorImage?: string
   update: UpdateInfo | null
+
+  // 对话历史（会员专享）
+  convId: string
+  convList: ConvMeta[]
+  historyOpen: boolean
+  loadHistory: () => Promise<void>
+  newConversation: () => Promise<void>
+  openConversation: (id: string) => Promise<void>
+  deleteConversation: (id: string) => Promise<void>
+  setHistoryOpen: (v: boolean) => void
+  persistConv: () => Promise<void>
 
   init: () => Promise<void>
   checkUpdate: () => Promise<void>
@@ -83,6 +124,35 @@ export const useApp = create<AppStore>((set, get) => ({
   needRecharge: false,
   editorImage: undefined,
   update: null,
+  convId: uid(),
+  convList: [],
+  historyOpen: false,
+
+  setHistoryOpen: (historyOpen) => set({ historyOpen }),
+  async loadHistory() { set({ convList: await convMetas() }) },
+  async persistConv() {
+    const { messages, convId } = get()
+    if (!messages.length) return
+    const title = (messages.find((m) => m.role === 'user')?.content || '新对话').slice(0, 24)
+    await convSave({ id: convId, title, at: Date.now(), msgs: messages })
+    set({ convList: await convMetas() })
+  },
+  async newConversation() {
+    // 免费用户不保留多段历史：开新对话时删掉旧的
+    if (!get().account?.quota.memberActive) await convDel(get().convId)
+    set({ convId: uid(), messages: [], historyOpen: false, view: 'chat' })
+    set({ convList: await convMetas() })
+  },
+  async openConversation(id) {
+    const msgs = await convLoad(id)
+    set({ convId: id, messages: msgs, historyOpen: false, view: 'chat' })
+  },
+  async deleteConversation(id) {
+    await convDel(id)
+    const list = await convMetas()
+    set({ convList: list })
+    if (id === get().convId) set({ convId: uid(), messages: [] })
+  },
 
   async checkUpdate() {
     try {
@@ -114,12 +184,18 @@ export const useApp = create<AppStore>((set, get) => ({
       const me = await api.me()
       if (me.ok) {
         const m = await api.models()
+        const metas = await convMetas()
+        const recent = metas[0]
+        const recentMsgs = recent ? await convLoad(recent.id) : []
         set({
           account: { phone: me.data.phone, quota: me.data },
           models: m.data.models || [],
           selectedModel: (m.data.models || [])[0] || '',
           settings,
-          ready: true
+          ready: true,
+          convList: metas,
+          convId: recent ? recent.id : get().convId,
+          messages: recentMsgs
         })
         return
       }
@@ -271,9 +347,10 @@ export const useApp = create<AppStore>((set, get) => ({
       if (acc) patch.account = { ...acc, quota: res!.data.quota }
     }
     set(patch)
+    void get().persistConv()
   },
 
-  clearChat: () => set({ messages: [] }),
+  clearChat: () => { void get().newConversation() },
   setNeedRecharge: (needRecharge) => set({ needRecharge }),
   sendToEditor: (dataUrl) => set({ editorImage: dataUrl, view: 'editor' })
 }))
