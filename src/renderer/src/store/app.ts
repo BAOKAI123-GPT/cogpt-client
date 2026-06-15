@@ -223,6 +223,15 @@ export const useApp = create<AppStore>((set, get) => ({
         })
         return
       }
+      // 校验/审核类错误（如提示词为空、内容违规）：重试也没用，直接提示
+      if (res.status === 400) {
+        set({
+          messages: [...get().messages, { role: 'assistant', content: `⚠️ ${res.data?.error ?? '请求有误，请修改后重试'}` }],
+          generating: false,
+          genStatus: ''
+        })
+        return
+      }
       if (res.ok && res.data.images && res.data.images.length) break // 成功，结束重试
       lastErr = res.data?.error || '生成失败，请稍后再试'
     }

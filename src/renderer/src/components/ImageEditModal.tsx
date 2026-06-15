@@ -98,6 +98,11 @@ export function ImageEditModal({
         alert('额度已用完，请到会员中心充值后再试。')
         return
       }
+      if (res.status === 400) {
+        setBusy(null)
+        alert(res.data?.error ?? '请求有误，请修改后重试')
+        return
+      }
       if (res.ok && res.data.images && res.data.images[0]) break
       lastErr = res.data?.error ?? '重绘失败'
     }

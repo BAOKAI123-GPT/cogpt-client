@@ -114,7 +114,8 @@ export function ChatView(): JSX.Element {
 
   async function send(prompt?: string): Promise<void> {
     const p = (prompt ?? text).trim()
-    if ((!p && refs.length === 0) || generating) return
+    // 必须有文字描述（即使带了参考图，gpt-image 也要求描述想要的画面，否则会报错）
+    if (!p || generating) return
     const initImages = [
       ...(continueEdit && lastAssistantImage ? [lastAssistantImage] : []),
       ...refs
@@ -311,7 +312,8 @@ export function ChatView(): JSX.Element {
             <button
               className="btn-primary h-[52px] px-4"
               onClick={() => send()}
-              disabled={generating}
+              disabled={generating || !text.trim()}
+              title={!text.trim() ? '请输入文字描述' : '生成'}
             >
               {generating ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
             </button>
