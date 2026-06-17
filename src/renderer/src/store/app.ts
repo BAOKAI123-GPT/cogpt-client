@@ -93,7 +93,7 @@ interface AppStore {
   checkUpdate: () => Promise<void>
   dismissUpdate: () => void
   sendCode: (phone: string) => Promise<{ ok: boolean; error?: string }>
-  loginWithCode: (phone: string, code: string) => Promise<{ ok: boolean; error?: string }>
+  loginWithCode: (phone: string, code: string, invite?: string) => Promise<{ ok: boolean; error?: string }>
   logout: () => void
   refreshMe: () => Promise<void>
   recharge: (tier: string) => Promise<void>
@@ -211,8 +211,8 @@ export const useApp = create<AppStore>((set, get) => ({
     return r.ok ? { ok: true } : { ok: false, error: r.data?.error || '发送失败' }
   },
 
-  async loginWithCode(phone, code) {
-    const r = await api.login(phone, code)
+  async loginWithCode(phone, code, invite) {
+    const r = await api.login(phone, code, invite)
     if (!r.ok || !r.data?.token) return { ok: false, error: r.data?.error || '登录失败' }
     localStorage.setItem(TOKEN_KEY, r.data.token)
     setToken(r.data.token)

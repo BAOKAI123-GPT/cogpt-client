@@ -1,4 +1,5 @@
-import { LogOut, ShieldCheck } from 'lucide-react'
+import { useState } from 'react'
+import { LogOut, ShieldCheck, Gift } from 'lucide-react'
 import { useApp } from '../store/app'
 import type { AppSettings } from '@shared/types'
 
@@ -8,6 +9,23 @@ export function SettingsView(): JSX.Element {
   const saveSettings = useApp((s) => s.saveSettings)
   const logout = useApp((s) => s.logout)
   const q = account?.quota
+  const [copied, setCopied] = useState(false)
+  const code = q?.inviteCode || ''
+  const promo = `最近在用一个 AI 生图工具，挺惊艳的——用的是 GPT-image2，出图质量是真高。价格也不贵，现在有个 9.9 的套餐挺超值。你注册的时候填我的邀请码 ${code}，能白送你 10 次免费生图。国内直接打开就能用，不用翻墙：https://cogpt.art/app`
+  async function copyPromo(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(promo)
+    } catch {
+      const t = document.createElement('textarea')
+      t.value = promo
+      document.body.appendChild(t)
+      t.select()
+      document.execCommand('copy')
+      t.remove()
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2500)
+  }
 
   return (
     <div className="h-full overflow-auto">
@@ -20,9 +38,27 @@ export function SettingsView(): JSX.Element {
             {q?.memberActive
               ? `会员 ${q.memberTier} · 剩余 ${q.memberCredits} 次`
               : `免费用户 · 今日剩余 ${q?.freeRemaining ?? 0}/${q?.freeDaily ?? 0} 次`}
+            {q?.bonusCredits ? ` · 赠送 ${q.bonusCredits} 次` : ''}
           </div>
           <button className="btn-soft mt-3" onClick={logout}>
             <LogOut size={15} /> 退出登录
+          </button>
+        </section>
+
+        {/* 邀请好友 */}
+        <section className="card p-5">
+          <h2 className="font-medium mb-1 flex items-center gap-2">
+            <Gift size={16} className="text-brand" /> 邀请好友 · 各得免费次数
+          </h2>
+          <p className="text-sm text-gray-400 mb-3">
+            朋友注册时填你的邀请码：<b className="text-gray-200">TA 得 10 次，你得 30 次</b>。已成功邀请{' '}
+            <b className="text-brand">{q?.inviteCount ?? 0}</b> 人。
+          </p>
+          <div className="font-mono text-2xl font-bold tracking-widest text-center py-3 rounded-xl bg-white/5 border border-white/10">
+            {code || '——'}
+          </div>
+          <button className="btn-primary w-full mt-3" onClick={copyPromo}>
+            {copied ? '已复制，去粘贴给朋友吧' : '一键复制邀请文案'}
           </button>
         </section>
 

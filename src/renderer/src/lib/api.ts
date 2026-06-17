@@ -22,17 +22,20 @@ export interface Quota {
   memberTier: string
   memberCredits: number
   memberExpiresAt: string | null
+  bonusCredits: number
   freeRemaining: number
   freeDaily: number
   canGenerate: boolean
-  source: 'member' | 'free' | null
+  source: 'member' | 'bonus' | 'free' | null
+  inviteCode?: string
+  inviteCount?: number
 }
 
 export const api = {
   sendCode: (phone: string) =>
     req('/api/auth/send-code', { method: 'POST', body: JSON.stringify({ phone }) }),
-  login: (phone: string, code: string) =>
-    req('/api/auth/login', { method: 'POST', body: JSON.stringify({ phone, code }) }),
+  login: (phone: string, code: string, invite?: string) =>
+    req('/api/auth/login', { method: 'POST', body: JSON.stringify({ phone, code, invite }) }),
   me: (): Promise<{ ok: boolean; status: number; data: { phone: string } & Quota }> => req('/api/me'),
   models: (): Promise<{ ok: boolean; data: { models: string[] } }> => req('/api/models'),
   tiers: (): Promise<{

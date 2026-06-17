@@ -12,6 +12,7 @@ export function LoginView(): JSX.Element {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [agreed, setAgreed] = useState(false)
+  const [invite, setInvite] = useState('')
 
   useEffect(() => {
     if (countdown <= 0) return
@@ -40,7 +41,7 @@ export function LoginView(): JSX.Element {
     }
     setErr('')
     setBusy(true)
-    const r = await loginWithCode(phone, code)
+    const r = await loginWithCode(phone, code, invite)
     setBusy(false)
     if (!r.ok) setErr(r.error || '登录失败')
   }
@@ -87,6 +88,15 @@ export function LoginView(): JSX.Element {
             {countdown > 0 ? `${countdown}s` : sent ? '重新发送' : '发送验证码'}
           </button>
         </div>
+
+        <label className="label mt-3">邀请码（选填）</label>
+        <input
+          className="field"
+          placeholder="有邀请码填这里，注册各得免费次数"
+          value={invite}
+          maxLength={12}
+          onChange={(e) => setInvite(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+        />
 
         {err && <p className="text-sm text-red-400 mt-2">{err}</p>}
 
