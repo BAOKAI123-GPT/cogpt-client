@@ -121,6 +121,7 @@ interface AppStore {
 }
 
 let genAC: AbortController | null = null // 当前生图请求的中止控制器
+let genReqId: string | null = null // 当前生图的 reqId（用于通知服务端中止）
 
 export const useApp = create<AppStore>((set, get) => ({
   ready: false,
@@ -296,6 +297,7 @@ export const useApp = create<AppStore>((set, get) => ({
     const size = opts?.ratioKey ? modelSizeFor(opts.ratioKey) : undefined
     // 稳定的 reqId：3 次重试共用同一个，服务端据此幂等去重，避免重复扣费
     const reqId = crypto.randomUUID()
+    genReqId = reqId
     const reqBody = {
       prompt: trimmed,
       size,
@@ -335,6 +337,17 @@ export const useApp = create<AppStore>((set, get) => ({
         genAC = null
         set({
           messages: [...get().messages, { role: 'assistant', content: `⚠️ ${res.data?.error ?? '请求有误，请修改后重试'}` }],
+          generating: false,
+          genStatus: '',
+          canAbort: false
+        })
+        return
+      }
+      // 忙（上一张还在收尾）：不重试，提示稍候
+      if (res.status === 429) {
+        genAC = null
+        set({
+          messages: [...get().messages, { role: 'assistant', content: `⚠️ ${res.data?.error || '上一张还在收尾，请等几秒再试'}` }],
           generating: false,
           genStatus: '',
           canAbort: false
@@ -402,7 +415,7 @@ export const useApp = create<AppStore>((set, get) => ({
   sendToEditor: (dataUrl) => set({ editorImage: dataUrl, view: 'editor' }),
 
   setChatMode: (chatMode) => set({ chatMode }),
-  abortGenerate: () => { genAC?.abort() },
+  abortGenerate: () => { if (genReqId) void api.cancelGenerate(genReqId); genAC?.abort() },
 
   // 局部重绘结果同步进聊天框，保存记录
   addAssistantImage: (dataUrl) => {

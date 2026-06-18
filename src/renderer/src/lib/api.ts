@@ -41,6 +41,8 @@ export const api = {
     messages: { role: string; content: string }[]
   ): Promise<{ ok: boolean; status: number; data: { reply?: string; quota?: Quota; error?: string; needRecharge?: boolean } }> =>
     req('/api/chat', { method: 'POST', body: JSON.stringify({ messages }) }),
+  cancelGenerate: (reqId: string): Promise<{ ok: boolean; status: number; data: any }> =>
+    req('/api/generate/cancel', { method: 'POST', body: JSON.stringify({ reqId }) }),
   models: (): Promise<{ ok: boolean; data: { models: string[] } }> => req('/api/models'),
   tiers: (): Promise<{
     ok: boolean

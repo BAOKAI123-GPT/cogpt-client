@@ -1,6 +1,6 @@
 {
   "name": "cogpt",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Co-GPT — 对话即创作的 AI 生图工作台",
   "main": "./out/main/index.js",
   "author": "Co-GPT",
