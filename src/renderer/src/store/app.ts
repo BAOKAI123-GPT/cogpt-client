@@ -109,6 +109,12 @@ interface AppStore {
   clearChat: () => void
   setNeedRecharge: (v: boolean) => void
   sendToEditor: (dataUrl: string) => void
+
+  // 对话模式（GPT 沟通创意，每次 0.5 次额度，由服务端计费）
+  chatMode: boolean
+  setChatMode: (v: boolean) => void
+  chatSend: (text: string) => Promise<void>
+  addAssistantImage: (dataUrl: string) => void // 局部重绘结果同步进聊天
 }
 
 export const useApp = create<AppStore>((set, get) => ({
@@ -124,6 +130,7 @@ export const useApp = create<AppStore>((set, get) => ({
   needRecharge: false,
   editorImage: undefined,
   update: null,
+  chatMode: false,
   convId: uid(),
   convList: [],
   historyOpen: false,
@@ -352,5 +359,53 @@ export const useApp = create<AppStore>((set, get) => ({
 
   clearChat: () => { void get().newConversation() },
   setNeedRecharge: (needRecharge) => set({ needRecharge }),
-  sendToEditor: (dataUrl) => set({ editorImage: dataUrl, view: 'editor' })
+  sendToEditor: (dataUrl) => set({ editorImage: dataUrl, view: 'editor' }),
+
+  setChatMode: (chatMode) => set({ chatMode }),
+
+  // 局部重绘结果同步进聊天框，保存记录
+  addAssistantImage: (dataUrl) => {
+    set({ messages: [...get().messages, { role: 'assistant', content: '（局部重绘）', images: [dataUrl] }] })
+    void get().persistConv()
+  },
+
+  async chatSend(input) {
+    const p = input.trim()
+    if (!p || get().generating) return
+    // 回复"生成"等 → 用沟通好的提示词直接出图
+    if (/^(生成|出图|生成图片|开始生成|画吧|可以了|可以生成)$/.test(p)) {
+      const msgs = get().messages
+      let gp = ''
+      for (let i = msgs.length - 1; i >= 0 && !gp; i--) {
+        const m = msgs[i]
+        if (m.role === 'assistant' && m.content) { const mm = /\[\[生图提示词\]\]\s*(.+)/.exec(m.content); if (mm) gp = mm[1].trim() }
+      }
+      if (!gp) for (let i = msgs.length - 1; i >= 0 && !gp; i--) { if (msgs[i].role === 'user' && msgs[i].content) gp = msgs[i].content.trim() }
+      if (gp) { await get().generate(gp); return }
+    }
+    const msgs = get().messages
+    const history = [
+      ...msgs.filter((m) => !!m.content).map((m) => ({ role: m.role, content: m.content })),
+      { role: 'user', content: p }
+    ].slice(-12)
+    set({ messages: [...msgs, { role: 'user', content: p }], generating: true, genStatus: '正在思考…' })
+    let r: Awaited<ReturnType<typeof api.chat>>
+    try {
+      r = await api.chat(history)
+    } catch {
+      r = { ok: false, status: 0, data: { error: '网络异常' } }
+    }
+    if (r.status === 402 || r.data?.needRecharge) {
+      set({ messages: [...get().messages, { role: 'assistant', content: '⚠️ 额度已用完，请开通/升级或邀请好友得免费次数。' }], generating: false, genStatus: '', needRecharge: true })
+      return
+    }
+    if (r.ok && r.data?.reply) {
+      const patch: Partial<AppStore> = { messages: [...get().messages, { role: 'assistant', content: r.data.reply }], generating: false, genStatus: '' }
+      if (r.data.quota) { const acc = get().account; if (acc) patch.account = { ...acc, quota: r.data.quota } }
+      set(patch)
+      void get().persistConv()
+    } else {
+      set({ messages: [...get().messages, { role: 'assistant', content: `⚠️ ${r.data?.error || '对话失败'}` }], generating: false, genStatus: '' })
+    }
+  }
 }))

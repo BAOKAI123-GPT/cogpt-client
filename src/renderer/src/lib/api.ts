@@ -37,6 +37,10 @@ export const api = {
   login: (phone: string, code: string, invite?: string) =>
     req('/api/auth/login', { method: 'POST', body: JSON.stringify({ phone, code, invite }) }),
   me: (): Promise<{ ok: boolean; status: number; data: { phone: string } & Quota }> => req('/api/me'),
+  chat: (
+    messages: { role: string; content: string }[]
+  ): Promise<{ ok: boolean; status: number; data: { reply?: string; quota?: Quota; error?: string; needRecharge?: boolean } }> =>
+    req('/api/chat', { method: 'POST', body: JSON.stringify({ messages }) }),
   models: (): Promise<{ ok: boolean; data: { models: string[] } }> => req('/api/models'),
   tiers: (): Promise<{
     ok: boolean

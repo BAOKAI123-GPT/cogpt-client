@@ -15,6 +15,7 @@ import {
 import { useApp } from '../store/app'
 import type { ChatMessage } from '@shared/types'
 import { extractImages } from '../lib/files'
+import { nextImgName } from '../lib/imgname'
 import { ImageEditModal } from '../components/ImageEditModal'
 import {
   RATIOS,
@@ -34,9 +35,10 @@ const SUGGESTIONS = [
 
 // 模型友好名（让用户能凭直觉选「快速 / 高质量」，gpt-image 系列出图本身约 35–60 秒）
 const MODEL_LABELS: Record<string, string> = {
+  'gemini-2.5-flash-image': 'Nano Banana（文字准）',
   'gpt-image-1-mini': '快速（约 35s）',
-  'gpt-image-2': '高质量（约 50–60s）',
-  'gpt-image-2-all': '高质量（约 50–60s）',
+  'gpt-image-2': '高质量GPT（约 50–60s）',
+  'gpt-image-2-all': '高质量GPT（约 50–60s）',
   'gpt-image-1': '标准',
   'gpt-image-1.5': '高清'
 }
@@ -54,6 +56,9 @@ export function ChatView(): JSX.Element {
   const models = useApp((s) => s.models)
   const selectedModel = useApp((s) => s.selectedModel)
   const setSelectedModel = useApp((s) => s.setSelectedModel)
+  const chatMode = useApp((s) => s.chatMode)
+  const setChatMode = useApp((s) => s.setChatMode)
+  const chatSend = useApp((s) => s.chatSend)
 
   const [text, setText] = useState('')
   const [continueEdit, setContinueEdit] = useState(false)
@@ -85,7 +90,7 @@ export function ChatView(): JSX.Element {
       items: [
         { label: '引用为参考图重新生成', fn: () => addRefs([dataUrl]) },
         { label: '编辑 / 局部重绘', fn: () => setEditImage(dataUrl) },
-        { label: '保存图片', fn: () => window.api.image.save({ dataUrl, format }) }
+        { label: '保存图片', fn: () => window.api.image.save({ dataUrl, format, defaultName: nextImgName(format) }) }
       ]
     })
   }
@@ -116,6 +121,8 @@ export function ChatView(): JSX.Element {
     const p = (prompt ?? text).trim()
     // 必须有文字描述（即使带了参考图，gpt-image 也要求描述想要的画面，否则会报错）
     if (!p || generating) return
+    // 对话模式：走 GPT 沟通（每次 0.5 次额度）
+    if (chatMode) { setText(''); await chatSend(p); return }
     const initImages = [
       ...(continueEdit && lastAssistantImage ? [lastAssistantImage] : []),
       ...refs
@@ -251,34 +258,43 @@ export function ChatView(): JSX.Element {
 
           {/* 工具行：参考图 / 比例 / 画质 / 继续修改 */}
           <div className="flex items-center gap-2 mb-2 flex-wrap">
-            <button className="btn-soft py-1.5 px-2.5 text-xs" onClick={pickRefs}>
-              <ImagePlus size={14} /> 参考图
-            </button>
-            <RatioPicker value={ratio} model={selectedModel} onChange={setRatio} />
-            <QualityPicker value={quality} onChange={setQuality} />
-            {models.length > 1 && (
-              <select
-                className="field py-1.5 px-2 text-xs w-auto"
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                title="生图模型"
-              >
-                {models.map((m) => (
-                  <option key={m} value={m}>
-                    {modelLabel(m)}
-                  </option>
-                ))}
-              </select>
+            {/* 模式切换：对话沟通创意 / 直接生图 */}
+            <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
+              <button className={`px-3 py-1.5 ${chatMode ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setChatMode(true)}>对话模式</button>
+              <button className={`px-3 py-1.5 ${!chatMode ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setChatMode(false)}>生图模式</button>
+            </div>
+            {!chatMode && (
+              <>
+                <button className="btn-soft py-1.5 px-2.5 text-xs" onClick={pickRefs}>
+                  <ImagePlus size={14} /> 参考图
+                </button>
+                <RatioPicker value={ratio} model={selectedModel} onChange={setRatio} />
+                <QualityPicker value={quality} onChange={setQuality} />
+                {models.length > 1 && (
+                  <select
+                    className="field py-1.5 px-2 text-xs w-auto"
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    title="生图模型"
+                  >
+                    {models.map((m) => (
+                      <option key={m} value={m}>
+                        {modelLabel(m)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer ml-auto">
+                  <input
+                    type="checkbox"
+                    checked={continueEdit}
+                    disabled={!lastAssistantImage}
+                    onChange={(e) => setContinueEdit(e.target.checked)}
+                  />
+                  <RefreshCw size={13} /> 基于上一张继续改
+                </label>
+              </>
             )}
-            <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer ml-auto">
-              <input
-                type="checkbox"
-                checked={continueEdit}
-                disabled={!lastAssistantImage}
-                onChange={(e) => setContinueEdit(e.target.checked)}
-              />
-              <RefreshCw size={13} /> 基于上一张继续改
-            </label>
             {messages.length > 0 && (
               <button
                 onClick={clearChat}
@@ -292,7 +308,7 @@ export function ChatView(): JSX.Element {
           <div className="flex items-end gap-2">
             <textarea
               className="field resize-none h-[52px] py-3"
-              placeholder="描述你想要的图片；也可拖入/粘贴图片作为参考图…"
+              placeholder={chatMode ? '说说你想要的图，我帮你聊清楚（想好了回复「生成」即可出图）…' : '描述你想要的图片；也可拖入/粘贴图片作为参考图…'}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onPaste={async (e) => {

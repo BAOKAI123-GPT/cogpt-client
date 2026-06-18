@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Brush, Eraser, RotateCcw, Download, Wand2, X, Loader2, Sparkles } from 'lucide-react'
 import { useApp } from '../store/app'
 import { api } from '../lib/api'
+import { nextImgName } from '../lib/imgname'
 import { buildMaskDataUrl, type MaskStroke } from './canvas/mask'
 
 const MAX_W = 900
@@ -17,6 +18,7 @@ export function ImageEditModal({
   const selectedModel = useApp((s) => s.selectedModel)
   const refreshMe = useApp((s) => s.refreshMe)
   const sendToEditor = useApp((s) => s.sendToEditor)
+  const addAssistantImage = useApp((s) => s.addAssistantImage)
   const format = useApp((s) => s.settings.defaultFormat)
 
   const [working, setWorking] = useState(dataUrl)
@@ -112,6 +114,7 @@ export function ImageEditModal({
       setStrokes([])
       setMaskMode(false)
       setPrompt('')
+      addAssistantImage(res.data.images[0]) // 重绘结果同步进聊天框保存
       refreshMe()
     } else {
       alert(`${lastErr}（已自动重试 ${MAX} 次仍失败）`)
@@ -119,7 +122,7 @@ export function ImageEditModal({
   }
 
   async function save(): Promise<void> {
-    const r = await window.api.image.save({ dataUrl: working, format })
+    const r = await window.api.image.save({ dataUrl: working, format, defaultName: nextImgName(format) })
     if (r.ok) {
       setSaved(true)
       setTimeout(() => setSaved(false), 1500)
