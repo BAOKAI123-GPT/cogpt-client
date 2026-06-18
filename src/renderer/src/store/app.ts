@@ -162,22 +162,35 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async checkUpdate() {
+    let cur = ''
     try {
-      const cur = await window.api.app.getVersion()
-      const r = await api.appVersion()
-      if (r.ok && r.data.version && isNewer(r.data.version, cur)) {
-        set({
-          update: {
-            version: r.data.version,
-            current: cur,
-            url: r.data.url || 'https://cogpt.art/download',
-            notes: r.data.notes || '',
-            force: !!r.data.force
-          }
-        })
-      }
+      cur = await window.api.app.getVersion()
     } catch {
-      /* 离线/接口异常则不打扰 */
+      return
+    }
+    if (!cur) return
+    // 重试若干次：冷启动/网络抖动时单次请求可能失败，导致"有时不弹更新提示"。拿到明确结果才停。
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const r = await api.appVersion()
+        if (r.ok && r.data.version) {
+          if (isNewer(r.data.version, cur)) {
+            set({
+              update: {
+                version: r.data.version,
+                current: cur,
+                url: r.data.url || 'https://cogpt.art/download',
+                notes: r.data.notes || '',
+                force: !!r.data.force
+              }
+            })
+          }
+          return
+        }
+      } catch {
+        /* 网络抖动，稍后重试 */
+      }
+      await new Promise((res) => setTimeout(res, 3000))
     }
   },
   dismissUpdate: () => set({ update: null }),
