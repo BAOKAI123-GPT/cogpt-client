@@ -53,11 +53,11 @@ export const api = {
     initImages?: string[]
     mask?: string
     reqId?: string
-  }): Promise<{
+  }, signal?: AbortSignal): Promise<{
     ok: boolean
     status: number
     data: { ok?: boolean; images?: string[]; text?: string; quota?: Quota; error?: string; needRecharge?: boolean }
-  }> => req('/api/generate', { method: 'POST', body: JSON.stringify(body) }),
+  }> => req('/api/generate', { method: 'POST', body: JSON.stringify(body), signal }),
   payCreate: (
     tier: string
   ): Promise<{

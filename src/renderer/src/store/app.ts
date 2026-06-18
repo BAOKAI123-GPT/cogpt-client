@@ -115,7 +115,12 @@ interface AppStore {
   setChatMode: (v: boolean) => void
   chatSend: (text: string) => Promise<void>
   addAssistantImage: (dataUrl: string) => void // 局部重绘结果同步进聊天
+
+  canAbort: boolean // 生图进行中、可中止
+  abortGenerate: () => void
 }
+
+let genAC: AbortController | null = null // 当前生图请求的中止控制器
 
 export const useApp = create<AppStore>((set, get) => ({
   ready: false,
@@ -131,6 +136,7 @@ export const useApp = create<AppStore>((set, get) => ({
   editorImage: undefined,
   update: null,
   chatMode: false,
+  canAbort: false,
   convId: uid(),
   convList: [],
   historyOpen: false,
@@ -283,7 +289,9 @@ export const useApp = create<AppStore>((set, get) => ({
     }
 
     const userMsg: ChatMessage = { role: 'user', content: trimmed, images: refImages.length ? refImages : undefined }
-    set({ messages: [...get().messages, userMsg], generating: true, genStatus: '正在生成…' })
+    const ac = new AbortController()
+    genAC = ac
+    set({ messages: [...get().messages, userMsg], generating: true, genStatus: '正在生成…', canAbort: true })
 
     const size = opts?.ratioKey ? modelSizeFor(opts.ratioKey) : undefined
     // 稳定的 reqId：3 次重试共用同一个，服务端据此幂等去重，避免重复扣费
@@ -305,32 +313,51 @@ export const useApp = create<AppStore>((set, get) => ({
     for (let attempt = 1; attempt <= MAX; attempt++) {
       if (attempt > 1) set({ genStatus: `生成失败，正在自动重试 (${attempt}/${MAX})…` })
       try {
-        res = await api.generate(reqBody)
+        res = await api.generate(reqBody, ac.signal)
       } catch {
         res = { ok: false, status: 0, data: { error: '网络异常，无法连接服务器' } } as GenRes
       }
+      if (ac.signal.aborted) break // 用户中止，不再重试
       // 额度不足：不重试，直接提示
       if (res.status === 402 || res.data?.needRecharge) {
+        genAC = null
         set({
           messages: [...get().messages, { role: 'assistant', content: '⚠️ 额度已用完，请开通或升级会员后再试。' }],
           generating: false,
           genStatus: '',
+          canAbort: false,
           needRecharge: true
         })
         return
       }
       // 校验/审核类错误（如提示词为空、内容违规）：重试也没用，直接提示
       if (res.status === 400) {
+        genAC = null
         set({
           messages: [...get().messages, { role: 'assistant', content: `⚠️ ${res.data?.error ?? '请求有误，请修改后重试'}` }],
           generating: false,
-          genStatus: ''
+          genStatus: '',
+          canAbort: false
         })
         return
       }
       if (res.ok && res.data.images && res.data.images.length) break // 成功，结束重试
       lastErr = res.data?.error || '生成失败，请稍后再试'
     }
+
+    genAC = null
+    // 用户中止：未出图不计费（服务端在出图后才扣，中止即不扣）；刷新额度如实显示
+    if (ac.signal.aborted) {
+      set({
+        messages: [...get().messages, { role: 'assistant', content: '已中止生成（未出图，不计费）' }],
+        generating: false,
+        genStatus: '',
+        canAbort: false
+      })
+      await get().refreshMe()
+      return
+    }
+    set({ canAbort: false })
 
     const success = !!(res && res.ok && res.data.images && res.data.images.length)
     if (!success) {
@@ -375,6 +402,7 @@ export const useApp = create<AppStore>((set, get) => ({
   sendToEditor: (dataUrl) => set({ editorImage: dataUrl, view: 'editor' }),
 
   setChatMode: (chatMode) => set({ chatMode }),
+  abortGenerate: () => { genAC?.abort() },
 
   // 局部重绘结果同步进聊天框，保存记录
   addAssistantImage: (dataUrl) => {

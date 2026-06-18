@@ -59,6 +59,8 @@ export function ChatView(): JSX.Element {
   const chatMode = useApp((s) => s.chatMode)
   const setChatMode = useApp((s) => s.setChatMode)
   const chatSend = useApp((s) => s.chatSend)
+  const canAbort = useApp((s) => s.canAbort)
+  const abortGenerate = useApp((s) => s.abortGenerate)
 
   const [text, setText] = useState('')
   const [continueEdit, setContinueEdit] = useState(false)
@@ -232,7 +234,7 @@ export function ChatView(): JSX.Element {
             />
           ))}
 
-          {generating && <ProgressCard status={genStatus} />}
+          {generating && <ProgressCard status={genStatus} onAbort={canAbort ? abortGenerate : undefined} />}
         </div>
       </div>
 
@@ -449,7 +451,7 @@ function QualityPicker({ value, onChange }: { value: string; onChange: (v: strin
 }
 
 // 生图进度
-function ProgressCard({ status }: { status: string }): JSX.Element {
+function ProgressCard({ status, onAbort }: { status: string; onAbort?: () => void }): JSX.Element {
   const [sec, setSec] = useState(0)
   useEffect(() => {
     const t = setInterval(() => setSec((s) => s + 1), 1000)
@@ -463,6 +465,11 @@ function ProgressCard({ status }: { status: string }): JSX.Element {
         <Loader2 className="animate-spin text-brand" size={16} />
         <span>{status || '正在生成…'}</span>
         <span className="ml-auto text-xs text-gray-500 tabular-nums">{mm}:{ss}</span>
+        {onAbort && (
+          <button onClick={onAbort} className="btn-soft py-1 px-2.5 text-xs">
+            中止
+          </button>
+        )}
       </div>
       <div className="mt-2.5 h-1.5 rounded-full bg-white/10 overflow-hidden">
         <div className="h-full w-1/3 bg-brand rounded-full animate-[indeterminate_1.4s_ease-in-out_infinite]" />
