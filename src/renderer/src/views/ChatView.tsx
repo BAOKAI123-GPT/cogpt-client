@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useApp } from '../store/app'
 import type { ChatMessage } from '@shared/types'
+import type { ModelMeta } from '../lib/api'
 import { extractImages } from '../lib/files'
 import { nextImgName } from '../lib/imgname'
 import { ImageEditModal } from '../components/ImageEditModal'
@@ -33,17 +34,24 @@ const SUGGESTIONS = [
   '赛博朋克城市夜景，霓虹反射在湿润街道上，电影感'
 ]
 
-// 模型友好名（让用户能凭直觉选「快速 / 高质量」，gpt-image 系列出图本身约 35–60 秒）
+// 模型友好名。优先用后端 meta 驱动的友好名（避免后端上新模型显示裸 id），
+// 找不到再回退本地映射，最后回退裸 id。
 const MODEL_LABELS: Record<string, string> = {
-  'gemini-2.5-flash-image': 'Nano Banana（文字准）',
-  'gpt-image-1-mini': '快速（约 35s）',
-  'gpt-image-2': '高质量GPT（约 50–60s）',
-  'gpt-image-2-all': '高质量GPT（约 50–60s）',
+  'gemini-2.5-flash-image': 'Nano Banana',
+  'gpt-image-1-mini': '快速',
+  'gpt-image-2': '高质量GPT',
+  'gpt-image-2-all': '高质量GPT',
+  'gpt-image-2-light': '标准',
   'gpt-image-1': '标准',
   'gpt-image-1.5': '高清'
 }
-function modelLabel(m: string): string {
-  return MODEL_LABELS[m] ?? m
+function modelLabel(m: string, meta?: ModelMeta): string {
+  // 后端 meta 没有提供 label 字段时，按本地映射；对未知 quality 模型给出「高质量」兜底名
+  if (MODEL_LABELS[m]) return MODEL_LABELS[m]
+  const mode = meta?.[m]?.mode
+  if (mode === 'standard') return '标准'
+  if (mode === 'quality') return '高质量'
+  return m
 }
 
 export function ChatView(): JSX.Element {
@@ -54,8 +62,11 @@ export function ChatView(): JSX.Element {
   const clearChat = useApp((s) => s.clearChat)
   const setView = useApp((s) => s.setView)
   const models = useApp((s) => s.models)
+  const modelMeta = useApp((s) => s.modelMeta)
   const selectedModel = useApp((s) => s.selectedModel)
   const setSelectedModel = useApp((s) => s.setSelectedModel)
+  const tier = useApp((s) => s.tier)
+  const setTier = useApp((s) => s.setTier)
   const chatMode = useApp((s) => s.chatMode)
   const setChatMode = useApp((s) => s.setChatMode)
   const chatSend = useApp((s) => s.chatSend)
@@ -72,6 +83,13 @@ export function ChatView(): JSX.Element {
   const [menu, setMenu] = useState<{ x: number; y: number; items: { label: string; fn: () => void }[] } | null>(null)
   const format = useApp((s) => s.settings.defaultFormat)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // —— 即梦式两档：标准(扁平/便宜/无参考图/锁3画幅) / 高质量(可切 GPT·Nano、参考图、全比例) ——
+  const curMeta = modelMeta[selectedModel] || { mode: 'quality', credits: 1, ref: true }
+  const isStd = curMeta.mode === 'standard'
+  const refAllowed = !!curMeta.ref
+  // 高质量档下的可选模型（GPT / Nano Banana 等）
+  const qModels = models.filter((m) => modelMeta[m]?.mode !== 'standard')
 
   function onContextText(e: React.MouseEvent, text: string): void {
     e.preventDefault()
@@ -109,6 +127,11 @@ export function ChatView(): JSX.Element {
   useEffect(() => {
     if (selectedModel && !ratioSupported(selectedModel, ratio)) setRatio(DEFAULT_RATIO)
   }, [selectedModel, ratio])
+
+  // 标准档（不支持参考图的模型）下，清掉已选的参考图，避免发出会被拒绝的请求
+  useEffect(() => {
+    if (!refAllowed && refs.length) setRefs([])
+  }, [refAllowed, refs.length])
 
   function addRefs(urls: string[]): void {
     if (urls.length) setRefs((prev) => [...prev, ...urls].slice(0, 6))
@@ -206,7 +229,7 @@ export function ChatView(): JSX.Element {
             <div className="text-center pt-12">
               <h2 className="text-lg font-medium mb-1">描述你想要的画面，回车生成</h2>
               <p className="text-sm text-gray-500 mb-6">
-                正在使用 <span className="text-brand">Co-GPT</span> · {modelLabel(selectedModel)}
+                正在使用 <span className="text-brand">Co-GPT</span> · {modelLabel(selectedModel, modelMeta)}
                 <br />
                 <span className="text-xs">可拖入或粘贴图片作为「参考图」，让 AI 参考其风格/构图生成</span>
               </p>
@@ -258,54 +281,87 @@ export function ChatView(): JSX.Element {
             </div>
           )}
 
-          {/* 工具行：参考图 / 比例 / 画质 / 继续修改 */}
+          {/* 模式切换：对话沟通创意 / 直接生图（放在参考图区上方） */}
           <div className="flex items-center gap-2 mb-2 flex-wrap">
-            {/* 模式切换：对话沟通创意 / 直接生图 */}
             <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
               <button className={`px-3 py-1.5 ${chatMode ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setChatMode(true)}>对话模式</button>
               <button className={`px-3 py-1.5 ${!chatMode ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setChatMode(false)}>生图模式</button>
             </div>
-            {!chatMode && (
-              <>
-                <button className="btn-soft py-1.5 px-2.5 text-xs" onClick={pickRefs}>
-                  <ImagePlus size={14} /> 参考图
-                </button>
-                <RatioPicker value={ratio} model={selectedModel} onChange={setRatio} />
-                <QualityPicker value={quality} onChange={setQuality} />
-                {models.length > 1 && (
-                  <select
-                    className="field py-1.5 px-2 text-xs w-auto"
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    title="生图模型"
-                  >
-                    {models.map((m) => (
-                      <option key={m} value={m}>
-                        {modelLabel(m)}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer ml-auto">
-                  <input
-                    type="checkbox"
-                    checked={continueEdit}
-                    disabled={!lastAssistantImage}
-                    onChange={(e) => setContinueEdit(e.target.checked)}
-                  />
-                  <RefreshCw size={13} /> 基于上一张继续改
-                </label>
-              </>
-            )}
             {messages.length > 0 && (
               <button
                 onClick={clearChat}
-                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300"
+                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 ml-auto"
               >
                 <Trash2 size={13} /> 清空
               </button>
             )}
           </div>
+
+          {/* 生图模式：即梦式两档（标准/高质量）+ 画质切换 */}
+          {!chatMode && (
+            <>
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                {/* 档位：标准 / 高质量 */}
+                <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
+                  <button
+                    className={`px-3 py-1.5 ${isStd ? 'bg-brand text-white' : 'text-gray-400'}`}
+                    onClick={() => setTier('standard')}
+                  >
+                    标准
+                  </button>
+                  <button
+                    className={`px-3 py-1.5 ${!isStd ? 'bg-brand text-white' : 'text-gray-400'}`}
+                    onClick={() => setTier('quality')}
+                  >
+                    高质量
+                  </button>
+                </div>
+                {/* 画质：标准 / 高清 / 2K / 4K */}
+                <QualityPicker value={quality} onChange={setQuality} />
+                <span className="text-[11px] text-gray-500">
+                  本次扣 {curMeta.credits} 额度{isStd ? '' : '（可切模型 / 参考图 / 全比例）'}
+                </span>
+              </div>
+
+              {/* 高质量档：展开 高质量GPT / Nano Banana 选择 */}
+              {!isStd && qModels.length > 1 && (
+                <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                  {qModels.map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setSelectedModel(m)}
+                      className={`px-2.5 py-1 rounded-md text-xs ${
+                        m === selectedModel ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'
+                      }`}
+                    >
+                      {modelLabel(m, modelMeta)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* 工具行：参考图（仅支持参考图的模型）/ 比例 / 继续修改 */}
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                {refAllowed && (
+                  <button className="btn-soft py-1.5 px-2.5 text-xs" onClick={pickRefs}>
+                    <ImagePlus size={14} /> 参考图
+                  </button>
+                )}
+                <RatioPicker value={ratio} model={selectedModel} onChange={setRatio} />
+                {refAllowed && (
+                  <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer ml-auto">
+                    <input
+                      type="checkbox"
+                      checked={continueEdit}
+                      disabled={!lastAssistantImage}
+                      onChange={(e) => setContinueEdit(e.target.checked)}
+                    />
+                    <RefreshCw size={13} /> 基于上一张继续改
+                  </label>
+                )}
+              </div>
+            </>
+          )}
 
           <div className="flex items-end gap-2">
             <textarea

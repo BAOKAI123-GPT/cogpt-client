@@ -1,7 +1,23 @@
 import { create } from 'zustand'
 import type { AppSettings, ChatMessage } from '@shared/types'
-import { api, setToken, getToken, type Quota } from '../lib/api'
-import { modelSizeFor, qualityLongEdge } from '../lib/genOptions'
+import { api, setToken, getToken, type Quota, type ModelMeta, type ModelMetaItem } from '../lib/api'
+import { modelSizeFor, qualityLongEdge, ratioSupported, DEFAULT_RATIO } from '../lib/genOptions'
+
+export type Tier = 'standard' | 'quality'
+const DEFAULT_META: ModelMetaItem = { mode: 'quality', credits: 1, ref: true }
+
+// 按档位筛选模型：standard 档=mode 为 standard 的模型；quality 档=其余（GPT/Nano Banana 等）
+function modelsOfTier(models: string[], meta: ModelMeta, t: Tier): string[] {
+  return t === 'standard'
+    ? models.filter((m) => meta[m]?.mode === 'standard')
+    : models.filter((m) => meta[m]?.mode !== 'standard')
+}
+// 登录/初始化时挑默认模型与档位：优先标准档（便宜、最快），无标准档则退到高质量。
+function initialModelTier(models: string[], meta: ModelMeta): { model: string; tier: Tier } {
+  const std = modelsOfTier(models, meta, 'standard')
+  if (std.length) return { model: std[0], tier: 'standard' }
+  return { model: models[0] || '', tier: 'quality' }
+}
 
 export type View = 'chat' | 'library' | 'editor' | 'settings'
 const TOKEN_KEY = 'cogpt_token'
@@ -66,7 +82,9 @@ interface AppStore {
   ready: boolean
   account: Account | null
   models: string[]
+  modelMeta: ModelMeta // 后端 /api/models meta：每个模型的档位/扣额度/是否支持参考图
   selectedModel: string
+  tier: Tier // 当前质量档位：标准 / 高质量（即梦式两档）
   settings: AppSettings
   view: View
 
@@ -96,10 +114,10 @@ interface AppStore {
   loginWithCode: (phone: string, code: string, invite?: string) => Promise<{ ok: boolean; error?: string }>
   logout: () => void
   refreshMe: () => Promise<void>
-  recharge: (tier: string) => Promise<void>
 
   setView: (v: View) => void
   setSelectedModel: (m: string) => void
+  setTier: (t: Tier) => void // 切档：标准→选 standard 模型并清参考图；高质量→选可用质量模型
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>
 
   generate: (
@@ -127,7 +145,9 @@ export const useApp = create<AppStore>((set, get) => ({
   ready: false,
   account: null,
   models: [],
+  modelMeta: {},
   selectedModel: '',
+  tier: 'standard',
   settings: { defaultFormat: 'png', customFonts: [] },
   view: 'chat',
   messages: [],
@@ -211,13 +231,18 @@ export const useApp = create<AppStore>((set, get) => ({
       const me = await api.me()
       if (me.ok) {
         const m = await api.models()
+        const models = m.data.models || []
+        const modelMeta = m.data.meta || {}
+        const pick = initialModelTier(models, modelMeta)
         const metas = await convMetas()
         const recent = metas[0]
         const recentMsgs = recent ? await convLoad(recent.id) : []
         set({
           account: { phone: me.data.phone, quota: me.data },
-          models: m.data.models || [],
-          selectedModel: (m.data.models || [])[0] || '',
+          models,
+          modelMeta,
+          selectedModel: pick.model,
+          tier: pick.tier,
           settings,
           ready: true,
           convList: metas,
@@ -245,10 +270,15 @@ export const useApp = create<AppStore>((set, get) => ({
     setToken(r.data.token)
     const me = await api.me()
     const m = await api.models()
+    const models = m.data.models || []
+    const modelMeta = m.data.meta || {}
+    const pick = initialModelTier(models, modelMeta)
     set({
       account: me.ok ? { phone: me.data.phone, quota: me.data } : { phone, quota: me.data },
-      models: m.data.models || [],
-      selectedModel: (m.data.models || [])[0] || ''
+      models,
+      modelMeta,
+      selectedModel: pick.model,
+      tier: pick.tier
     })
     return { ok: true }
   },
@@ -265,14 +295,23 @@ export const useApp = create<AppStore>((set, get) => ({
     if (me.ok) set({ account: { phone: me.data.phone, quota: me.data } })
   },
 
-  async recharge(tier) {
-    const r = await api.payCreate(tier)
-    if (r.ok && r.data.payUrl) window.open(r.data.payUrl, '_blank')
-    else alert(r.data?.error || '下单失败')
-  },
-
   setView: (view) => set({ view }),
-  setSelectedModel: (selectedModel) => set({ selectedModel }),
+  // 在高质量档内切具体模型（GPT / Nano Banana）。tier 同步成该模型的档位。
+  setSelectedModel: (selectedModel) =>
+    set({
+      selectedModel,
+      tier: (get().modelMeta[selectedModel]?.mode === 'standard' ? 'standard' : 'quality') as Tier
+    }),
+  // 切档：标准→选 mode=standard 的模型（并由 generate 时隐藏参考图、锁 3 画幅）；
+  // 高质量→选可用的质量模型（保留当前若已是质量档）。没有对应模型则不动。
+  setTier(t) {
+    const { models, modelMeta, selectedModel } = get()
+    const list = modelsOfTier(models, modelMeta, t)
+    // 当前模型已属于目标档，仅切换 tier 标记即可
+    if (list.includes(selectedModel)) { set({ tier: t }); return }
+    if (!list.length) { set({ tier: t }); return } // 该档无模型：只切标记，UI 自行提示
+    set({ tier: t, selectedModel: list[0] })
+  },
 
   async saveSettings(patch) {
     const settings = await window.api.config.setSettings(patch)
@@ -281,20 +320,26 @@ export const useApp = create<AppStore>((set, get) => ({
 
   async generate(prompt, opts) {
     const trimmed = prompt.trim()
-    const refImages = opts?.initImages?.length ? opts.initImages : opts?.initImage ? [opts.initImage] : []
-    if (!trimmed && refImages.length === 0) return
     const model = get().selectedModel
     if (!model) {
       set({ messages: [...get().messages, { role: 'assistant', content: '⚠️ 暂无可用模型，请稍后重试' }] })
       return
     }
+    // 按 meta 收口：标准档（或模型不支持参考图）一律丢弃参考图，并把不支持的画幅回退到 1:1。
+    // 这样即使 UI 残留了参考图/比例，也不会发出该模型拒绝的请求。
+    const meta = get().modelMeta[model] || DEFAULT_META
+    let refImages = opts?.initImages?.length ? opts.initImages : opts?.initImage ? [opts.initImage] : []
+    if (!meta.ref) refImages = []
+    let ratioKey = opts?.ratioKey
+    if (ratioKey && !ratioSupported(model, ratioKey)) ratioKey = DEFAULT_RATIO
+    if (!trimmed && refImages.length === 0) return
 
     const userMsg: ChatMessage = { role: 'user', content: trimmed, images: refImages.length ? refImages : undefined }
     const ac = new AbortController()
     genAC = ac
     set({ messages: [...get().messages, userMsg], generating: true, genStatus: '正在生成…', canAbort: true })
 
-    const size = opts?.ratioKey ? modelSizeFor(opts.ratioKey) : undefined
+    const size = ratioKey ? modelSizeFor(ratioKey) : undefined
     // 稳定的 reqId：3 次重试共用同一个，服务端据此幂等去重，避免重复扣费
     const reqId = crypto.randomUUID()
     genReqId = reqId

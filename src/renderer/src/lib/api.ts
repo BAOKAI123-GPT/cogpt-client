@@ -17,6 +17,15 @@ async function req(path: string, opts: RequestInit = {}): Promise<any> {
   return { ok: r.ok, status: r.status, data }
 }
 
+// 每个模型的元信息：档位(standard/quality)、本次扣额度、是否支持参考图。
+// 由后端 /api/models 的 meta 字段驱动，前端据此做两档 UI、额度提示与参考图入口显隐。
+export interface ModelMetaItem {
+  mode: 'standard' | 'quality'
+  credits: number
+  ref: boolean
+}
+export type ModelMeta = Record<string, ModelMetaItem>
+
 export interface Quota {
   memberActive: boolean
   memberTier: string
@@ -43,7 +52,8 @@ export const api = {
     req('/api/chat', { method: 'POST', body: JSON.stringify({ messages }) }),
   cancelGenerate: (reqId: string): Promise<{ ok: boolean; status: number; data: any }> =>
     req('/api/generate/cancel', { method: 'POST', body: JSON.stringify({ reqId }) }),
-  models: (): Promise<{ ok: boolean; data: { models: string[] } }> => req('/api/models'),
+  models: (): Promise<{ ok: boolean; data: { models: string[]; meta?: ModelMeta } }> =>
+    req('/api/models'),
   tiers: (): Promise<{
     ok: boolean
     data: { tiers: { id: string; name: string; priceCents: number; quota: number }[] }

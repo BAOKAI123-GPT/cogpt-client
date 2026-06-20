@@ -28,9 +28,12 @@ export const RATIOS: RatioOption[] = [
 // 严格模型只支持的三种原生比例
 const STRICT_RATIOS = ['1:1', '2:3', '3:2']
 
-/** 该模型是否支持任意比例（gpt-image-2 系列支持） */
+/** 该模型是否支持任意比例。
+ *  gpt-image-2 / gpt-image-2-all 与 gemini(Nano Banana) 支持全部画幅；
+ *  但 gpt-image-2-light（标准档）只支持通用 3 档，故用负向断言排除 light。 */
 export function modelSupportsAnyRatio(model: string): boolean {
-  return /gpt-image-2/i.test(model || '')
+  const m = model || ''
+  return /gemini/i.test(m) || /gpt-image-2(?!-?light)/i.test(m)
 }
 
 /** 某模型是否支持某比例 */
