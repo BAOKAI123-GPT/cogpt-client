@@ -8,9 +8,9 @@ import {
   ImagePlus,
   RefreshCw,
   X,
-  Crop,
-  Sparkles,
-  ChevronDown
+  SlidersHorizontal,
+  MessageSquareQuote,
+  Image as ImageIcon
 } from 'lucide-react'
 import { useApp } from '../store/app'
 import type { ChatMessage } from '@shared/types'
@@ -82,6 +82,8 @@ export function ChatView(): JSX.Element {
   const [ratio, setRatio] = useState(DEFAULT_RATIO)
   const [quality, setQuality] = useState(DEFAULT_QUALITY)
   const [dragOver, setDragOver] = useState(false)
+  // 即梦式：单行控件 + 点开「设置」弹层放详细项（档位/模型/比例/画质）
+  const [panel, setPanel] = useState<'set' | null>(null)
   const [editImage, setEditImage] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; items: { label: string; fn: () => void }[] } | null>(null)
   const format = useApp((s) => s.settings.defaultFormat)
@@ -132,6 +134,9 @@ export function ChatView(): JSX.Element {
     pricing: pricing ?? undefined
   })
   const hasExtra = estPoints > curMeta.credits
+  // 设置按钮上的摘要：档位 · 比例 · 画质（如「高质量 · 1:1 · 高清」）
+  const qualityLabel = (QUALITIES.find((q) => q.key === quality) ?? QUALITIES[1]).label
+  const setSummary = `${isStd ? '标准' : '高质量'} · ${ratio} · ${qualityLabel}`
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -295,27 +300,12 @@ export function ChatView(): JSX.Element {
             </div>
           )}
 
-          {/* 模式切换：对话沟通创意 / 直接生图（放在参考图区上方） */}
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
-            <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
-              <button className={`px-3 py-1.5 ${chatMode ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setChatMode(true)}>对话模式</button>
-              <button className={`px-3 py-1.5 ${!chatMode ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setChatMode(false)}>生图模式</button>
-            </div>
-            {messages.length > 0 && (
-              <button
-                onClick={clearChat}
-                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 ml-auto"
-              >
-                <Trash2 size={13} /> 清空
-              </button>
-            )}
-          </div>
-
-          {/* 生图模式：即梦式两档（标准/高质量）+ 画质切换 */}
-          {!chatMode && (
-            <>
-              <div className="flex items-center gap-2 mb-2 flex-wrap">
-                {/* 档位：标准 / 高质量 */}
+          {/* 设置弹层（即梦式：把标准/高质量档 + 高质量模型 + 比例 + 画质收进一个紧凑面板，点「设置」从下方弹起） */}
+          {!chatMode && panel === 'set' && (
+            <div className="card p-3 mb-2 space-y-3">
+              {/* 档位：标准 / 高质量 */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-gray-400 w-12 shrink-0">画质档</span>
                 <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
                   <button
                     className={`px-3 py-1.5 ${isStd ? 'bg-brand text-white' : 'text-gray-400'}`}
@@ -330,20 +320,16 @@ export function ChatView(): JSX.Element {
                     高质量
                   </button>
                 </div>
-                {/* 画质：标准 / 高清 / 2K / 4K */}
-                <QualityPicker value={quality} onChange={setQuality} />
                 <span className="text-[11px] text-gray-500">
                   本次{hasExtra ? '约扣' : '扣'} <b className="text-gray-300">{estPoints}</b> 点
-                  {isStd ? '' : '（可切模型 / 参考图 / 全比例）'}
+                  {isStd ? '（通用 3 比例）' : '（可换模型 / 参考图 / 全比例）'}
                 </span>
               </div>
-              <p className="text-[10px] text-gray-600 mb-2 -mt-1">
-                多张参考图、超清（2K/4K）会额外计点；最终扣点以服务端为准。
-              </p>
 
               {/* 高质量档：展开 高质量GPT / Nano Banana 选择 */}
               {!isStd && qModels.length > 1 && (
-                <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-gray-400 w-12 shrink-0">模型</span>
                   {qModels.map((m) => (
                     <button
                       key={m}
@@ -358,28 +344,115 @@ export function ChatView(): JSX.Element {
                 </div>
               )}
 
-              {/* 工具行：参考图（仅支持参考图的模型）/ 比例 / 继续修改 */}
-              <div className="flex items-center gap-2 mb-2 flex-wrap">
-                {refAllowed && (
-                  <button className="btn-soft py-1.5 px-2.5 text-xs" onClick={pickRefs}>
-                    <ImagePlus size={14} /> 参考图
-                  </button>
-                )}
-                <RatioPicker value={ratio} model={selectedModel} onChange={setRatio} />
-                {refAllowed && (
-                  <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer ml-auto">
-                    <input
-                      type="checkbox"
-                      checked={continueEdit}
-                      disabled={!lastAssistantImage}
-                      onChange={(e) => setContinueEdit(e.target.checked)}
-                    />
-                    <RefreshCw size={13} /> 基于上一张继续改
-                  </label>
-                )}
+              {/* 比例 */}
+              <div>
+                <div className="text-xs text-gray-400 mb-1.5">
+                  比例
+                  {!modelSupportsAnyRatio(selectedModel) && (
+                    <span className="text-amber-300/80 font-normal"> （{modelLabel(selectedModel, modelMeta)} 仅 3 比例，9:16 等请切高质量）</span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {RATIOS.map((r) => {
+                    const ok = ratioSupported(selectedModel, r.key)
+                    return (
+                      <button
+                        key={r.key}
+                        disabled={!ok}
+                        title={ok ? '' : '当前模型不支持该比例'}
+                        onClick={() => ok && setRatio(r.key)}
+                        className={`px-2 py-1 rounded text-xs ${
+                          !ok
+                            ? 'opacity-30 line-through cursor-not-allowed bg-white/5'
+                            : r.key === ratio
+                              ? 'bg-brand text-white'
+                              : 'bg-white/5 hover:bg-white/10'
+                        }`}
+                      >
+                        {r.key}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-            </>
+
+              {/* 画质（高清化：本地等比放大，越高越清越慢） */}
+              <div>
+                <div className="text-xs text-gray-400 mb-1.5">画质（生成后本地放大，越高越清越慢）</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {QUALITIES.map((q) => (
+                    <button
+                      key={q.key}
+                      onClick={() => setQuality(q.key)}
+                      title={q.hint}
+                      className={`px-2.5 py-1 rounded text-xs ${
+                        q.key === quality ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'
+                      }`}
+                    >
+                      {q.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 基于上一张继续改 */}
+              {refAllowed && (
+                <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={continueEdit}
+                    disabled={!lastAssistantImage}
+                    onChange={(e) => setContinueEdit(e.target.checked)}
+                  />
+                  <RefreshCw size={13} /> 基于上一张继续改
+                </label>
+              )}
+
+              <p className="text-[10px] text-gray-600">
+                多张参考图、超清（2K/4K）会额外计点；最终扣点以服务端为准。
+              </p>
+            </div>
           )}
+
+          {/* 单行控件：对话/生图 + 参考图 + 设置（即梦式，详细项收进「设置」弹层；窗口窄时自动换行） */}
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
+              <button
+                className={`flex items-center gap-1 px-3 py-1.5 ${chatMode ? 'bg-brand text-white' : 'text-gray-400'}`}
+                onClick={() => { setChatMode(true); setPanel(null) }}
+              >
+                <MessageSquareQuote size={13} /> 对话
+              </button>
+              <button
+                className={`flex items-center gap-1 px-3 py-1.5 ${!chatMode ? 'bg-brand text-white' : 'text-gray-400'}`}
+                onClick={() => setChatMode(false)}
+              >
+                <ImageIcon size={13} /> 生图
+              </button>
+            </div>
+            {!chatMode && refAllowed && (
+              <button className="btn-soft py-1.5 px-2.5 text-xs" onClick={pickRefs}>
+                <ImagePlus size={14} /> 参考图{refs.length ? `(${refs.length})` : ''}
+              </button>
+            )}
+            {!chatMode && (
+              <button
+                className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'set' ? '!bg-brand !text-white !border-brand' : ''}`}
+                onClick={() => setPanel(panel === 'set' ? null : 'set')}
+                title="档位 / 模型 / 比例 / 画质"
+              >
+                <SlidersHorizontal size={14} /> {setSummary}
+              </button>
+            )}
+            {messages.length > 0 && (
+              <button
+                onClick={clearChat}
+                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 ml-auto"
+              >
+                <Trash2 size={13} /> 清空
+              </button>
+            )}
+          </div>
 
           <div className="flex items-end gap-2">
             <textarea
@@ -412,114 +485,6 @@ export function ChatView(): JSX.Element {
           </div>
         </div>
       </div>
-    </div>
-  )
-}
-
-// 比例选择（不支持的比例按当前模型禁用）
-function RatioPicker({
-  value,
-  model,
-  onChange
-}: {
-  value: string
-  model: string
-  onChange: (v: string) => void
-}): JSX.Element {
-  const [open, setOpen] = useState(false)
-  const cur = RATIOS.find((r) => r.key === value) ?? RATIOS[0]
-  const anyRatio = modelSupportsAnyRatio(model)
-  return (
-    <div className="relative">
-      <button
-        className="btn-soft py-1.5 px-2.5 text-xs"
-        onClick={() => setOpen((v) => !v)}
-        title="选择出图比例"
-      >
-        <Crop size={14} /> 比例 {cur.key} <ChevronDown size={12} />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full mb-1.5 z-20 card p-2 w-56 shadow-2xl">
-            {!anyRatio && (
-              <div className="text-[10px] text-amber-300/80 px-1 mb-1.5 leading-snug">
-                当前模型仅支持 3 种比例。需要 9:16 等更多比例，请把模型切到「高质量」。
-              </div>
-            )}
-            {(['方形', '竖版', '横版'] as const).map((g) => (
-              <div key={g} className="mb-1.5 last:mb-0">
-                <div className="text-[10px] text-gray-500 px-1 mb-1">{g}</div>
-                <div className="flex flex-wrap gap-1">
-                  {RATIOS.filter((r) => r.group === g).map((r) => {
-                    const ok = ratioSupported(model, r.key)
-                    return (
-                      <button
-                        key={r.key}
-                        disabled={!ok}
-                        title={ok ? '' : '当前模型不支持该比例'}
-                        onClick={() => {
-                          if (!ok) return
-                          onChange(r.key)
-                          setOpen(false)
-                        }}
-                        className={`px-2 py-1 rounded text-xs ${
-                          !ok
-                            ? 'opacity-30 line-through cursor-not-allowed bg-white/5'
-                            : r.key === value
-                              ? 'bg-brand text-white'
-                              : 'bg-white/5 hover:bg-white/10'
-                        }`}
-                      >
-                        {r.key}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-// 画质选择
-function QualityPicker({ value, onChange }: { value: string; onChange: (v: string) => void }): JSX.Element {
-  const [open, setOpen] = useState(false)
-  const cur = QUALITIES.find((q) => q.key === value) ?? QUALITIES[1]
-  return (
-    <div className="relative">
-      <button
-        className="btn-soft py-1.5 px-2.5 text-xs"
-        onClick={() => setOpen((v) => !v)}
-        title="选择出图画质"
-      >
-        <Sparkles size={14} /> 画质 {cur.label} <ChevronDown size={12} />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full mb-1.5 z-20 card p-1 w-48 shadow-2xl">
-            {QUALITIES.map((q) => (
-              <button
-                key={q.key}
-                onClick={() => {
-                  onChange(q.key)
-                  setOpen(false)
-                }}
-                className={`w-full text-left px-2.5 py-2 rounded-md ${
-                  q.key === value ? 'bg-brand/20 text-brand' : 'hover:bg-white/5'
-                }`}
-              >
-                <div className="text-sm">{q.label}</div>
-                <div className="text-[10px] text-gray-500">{q.hint}</div>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
     </div>
   )
 }
