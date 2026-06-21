@@ -81,7 +81,8 @@ export const api = {
   }, signal?: AbortSignal): Promise<{
     ok: boolean
     status: number
-    data: { ok?: boolean; images?: string[]; text?: string; quota?: Quota; error?: string; needRecharge?: boolean }
+    // fallback：所选模型繁忙失败、后端自动用「极速」模型补出了这张图；fallbackModel：实际出图的模型 id。
+    data: { ok?: boolean; images?: string[]; text?: string; quota?: Quota; error?: string; needRecharge?: boolean; fallback?: boolean; fallbackModel?: string }
   }> => req('/api/generate', { method: 'POST', body: JSON.stringify(body), signal }),
   payCreate: (
     tier: string

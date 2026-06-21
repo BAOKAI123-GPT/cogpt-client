@@ -560,6 +560,12 @@ function Bubble({
             ))}
           </div>
         )}
+        {/* 兜底提示：所选模型繁忙、已用「极速」模型补出图时，在结果图上方用琥珀色醒目显示 */}
+        {!isUser && msg.note && msg.images && msg.images.length > 0 && (
+          <div className="rounded-lg bg-amber-400/10 border border-amber-400/30 px-3 py-1.5 text-xs text-amber-300">
+            {msg.note}
+          </div>
+        )}
         {!isUser && msg.images?.map((img, i) => (
           <ImageCard key={i} dataUrl={img} onEdit={onEdit} onContextImage={onContextImage} />
         ))}

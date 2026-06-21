@@ -86,6 +86,8 @@ export interface ChatMessage {
   content: string
   /** 附带的图片 dataURL（用户上传或助手返图） */
   images?: string[]
+  /** 醒目提示（如所选模型繁忙、已用兜底模型补出图时的说明），渲染在结果图上方 */
+  note?: string
 }
 
 export interface AppSettings {

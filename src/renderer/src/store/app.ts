@@ -454,7 +454,11 @@ export const useApp = create<AppStore>((set, get) => ({
         )
       }
     }
-    const assistant: ChatMessage = { role: 'assistant', content: res!.data.text ?? '', images }
+    // 后端返回 fallback=true 时：所选高质量模型繁忙失败，已自动用「极速」模型补出这张图，告知用户风格可能略有不同。
+    const note = res!.data.fallback
+      ? '⚡ 高质量模型当前繁忙，已用「极速」模型为你生成（风格可能略有不同）'
+      : undefined
+    const assistant: ChatMessage = { role: 'assistant', content: res!.data.text ?? '', images, note }
     const patch: Partial<AppStore> = { messages: [...get().messages, assistant], generating: false, genStatus: '' }
     if (res!.data.quota) {
       const acc = get().account
