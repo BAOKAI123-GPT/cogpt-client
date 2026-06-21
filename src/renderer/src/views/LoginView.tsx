@@ -92,7 +92,7 @@ export function LoginView(): JSX.Element {
         <label className="label mt-3">邀请码（选填）</label>
         <input
           className="field"
-          placeholder="有邀请码填这里，注册各得免费次数"
+          placeholder="有邀请码填这里，双方各得 100 点免费额度"
           value={invite}
           maxLength={12}
           onChange={(e) => setInvite(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}

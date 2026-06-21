@@ -6,6 +6,8 @@
 // 因此：按所选模型的能力开放比例；模型出不了的比例直接禁选。
 // **永不本地裁切**：模型出多大比例就是多大；高清化只用 Lanczos 按长边等比放大（不裁、不变形）。
 
+import type { Pricing } from './api'
+
 export interface RatioOption {
   key: string
   label: string
@@ -70,7 +72,31 @@ export function modelSizeFor(ratioKey: string): string {
   return ratioByKey(ratioKey).size
 }
 
-/** 画质对应的长边像素（本地等比放大用，不裁切） */
+/** 画质对应的长边像素（本地等比放大用，不裁切；也作为 /api/generate 的 hdEdge 传给后端计高清加点） */
 export function qualityLongEdge(qualityKey: string): number {
   return qualityByKey(qualityKey).longEdge
+}
+
+/** 高清加点：按所选画质长边 hdEdge，取 pricing.hdSurcharge 中 hdEdge≥阈值的最大加点。
+ *  与服务端规则保持一致（服务端为权威，这里仅用于 UI 估算）。 */
+export function hdSurchargeFor(hdEdge: number, pricing?: Pricing): number {
+  if (!pricing?.hdSurcharge) return 0
+  let add = 0
+  for (const [edge, points] of Object.entries(pricing.hdSurcharge)) {
+    if (hdEdge >= Number(edge)) add = Math.max(add, Number(points) || 0)
+  }
+  return add
+}
+
+/** 估算本次扣点 = 基础点(meta.credits) + 多参考图(>1 张时每多 1 张 +refExtraPoints) + 高清加点(按 hdEdge)。
+ *  服务端为权威计费，这里仅用于 UI 展示「本次约扣 N 点」。 */
+export function estimatePoints(opts: {
+  baseCredits: number
+  refCount?: number
+  hdEdge?: number
+  pricing?: Pricing
+}): number {
+  const { baseCredits, refCount = 0, hdEdge = 0, pricing } = opts
+  const refExtra = refCount > 1 && pricing ? (refCount - 1) * (pricing.refExtraPoints || 0) : 0
+  return baseCredits + refExtra + hdSurchargeFor(hdEdge, pricing)
 }

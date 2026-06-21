@@ -24,7 +24,9 @@ import {
   DEFAULT_RATIO,
   DEFAULT_QUALITY,
   ratioSupported,
-  modelSupportsAnyRatio
+  modelSupportsAnyRatio,
+  qualityLongEdge,
+  estimatePoints
 } from '../lib/genOptions'
 
 const SUGGESTIONS = [
@@ -63,6 +65,7 @@ export function ChatView(): JSX.Element {
   const setView = useApp((s) => s.setView)
   const models = useApp((s) => s.models)
   const modelMeta = useApp((s) => s.modelMeta)
+  const pricing = useApp((s) => s.pricing)
   const selectedModel = useApp((s) => s.selectedModel)
   const setSelectedModel = useApp((s) => s.setSelectedModel)
   const tier = useApp((s) => s.tier)
@@ -119,6 +122,17 @@ export function ChatView(): JSX.Element {
     .reverse()
     .find((m) => m.role === 'assistant' && m.images?.length)?.images?.[0]
 
+  // 估算本次扣点：基础点(meta.credits) + 多参考图加点 + 高清加点（按所选画质长边）。
+  // 实际计费以服务端为准；这里仅用于「本次约扣 N 点」提示。
+  const refCount = refs.length + (continueEdit && lastAssistantImage ? 1 : 0)
+  const estPoints = estimatePoints({
+    baseCredits: curMeta.credits,
+    refCount: refAllowed ? refCount : 0,
+    hdEdge: qualityLongEdge(quality),
+    pricing: pricing ?? undefined
+  })
+  const hasExtra = estPoints > curMeta.credits
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, generating])
@@ -146,7 +160,7 @@ export function ChatView(): JSX.Element {
     const p = (prompt ?? text).trim()
     // 必须有文字描述（即使带了参考图，gpt-image 也要求描述想要的画面，否则会报错）
     if (!p || generating) return
-    // 对话模式：走 GPT 沟通（每次 0.5 次额度）
+    // 对话模式：走 GPT 沟通（按点数计费，由服务端权威扣点）
     if (chatMode) { setText(''); await chatSend(p); return }
     const initImages = [
       ...(continueEdit && lastAssistantImage ? [lastAssistantImage] : []),
@@ -319,9 +333,13 @@ export function ChatView(): JSX.Element {
                 {/* 画质：标准 / 高清 / 2K / 4K */}
                 <QualityPicker value={quality} onChange={setQuality} />
                 <span className="text-[11px] text-gray-500">
-                  本次扣 {curMeta.credits} 额度{isStd ? '' : '（可切模型 / 参考图 / 全比例）'}
+                  本次{hasExtra ? '约扣' : '扣'} <b className="text-gray-300">{estPoints}</b> 点
+                  {isStd ? '' : '（可切模型 / 参考图 / 全比例）'}
                 </span>
               </div>
+              <p className="text-[10px] text-gray-600 mb-2 -mt-1">
+                多张参考图、超清（2K/4K）会额外计点；最终扣点以服务端为准。
+              </p>
 
               {/* 高质量档：展开 高质量GPT / Nano Banana 选择 */}
               {!isStd && qModels.length > 1 && (

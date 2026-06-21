@@ -138,6 +138,7 @@ export function ImageEditModal({
     if (!selectedModel || !prompt.trim() || strokes.length === 0) return
     const mask = buildMaskDataUrl(nat.w, nat.h, strokes)
     const reqId = crypto.randomUUID()
+    // 局部重绘按原图尺寸出图，不放大；故不传 hdEdge，避免触发高清加点。
     const reqBody = {
       prompt: prompt.trim(),
       size: `${nat.w}x${nat.h}`,
@@ -160,7 +161,7 @@ export function ImageEditModal({
       }
       if (res.status === 402 || res.data?.needRecharge) {
         setBusy(null)
-        alert('额度已用完，请到会员中心充值后再试。')
+        alert('点数已用完，请到会员中心充值后再试。')
         return
       }
       if (res.status === 400) {

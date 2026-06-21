@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { AppSettings, ChatMessage } from '@shared/types'
-import { api, setToken, getToken, type Quota, type ModelMeta, type ModelMetaItem } from '../lib/api'
+import { api, setToken, getToken, type Quota, type ModelMeta, type ModelMetaItem, type Pricing } from '../lib/api'
 import { modelSizeFor, qualityLongEdge, ratioSupported, DEFAULT_RATIO } from '../lib/genOptions'
 
 export type Tier = 'standard' | 'quality'
@@ -82,7 +82,8 @@ interface AppStore {
   ready: boolean
   account: Account | null
   models: string[]
-  modelMeta: ModelMeta // 后端 /api/models meta：每个模型的档位/扣额度/是否支持参考图
+  modelMeta: ModelMeta // 后端 /api/models meta：每个模型的档位/扣点数/是否支持参考图
+  pricing: Pricing | null // 后端 /api/models pricing：多参考图/高清动态加点规则，用于 UI 估算
   selectedModel: string
   tier: Tier // 当前质量档位：标准 / 高质量（即梦式两档）
   settings: AppSettings
@@ -128,7 +129,7 @@ interface AppStore {
   setNeedRecharge: (v: boolean) => void
   sendToEditor: (dataUrl: string) => void
 
-  // 对话模式（GPT 沟通创意，每次 0.5 次额度，由服务端计费）
+  // 对话模式（GPT 沟通创意，按点数计费，由服务端权威扣点）
   chatMode: boolean
   setChatMode: (v: boolean) => void
   chatSend: (text: string) => Promise<void>
@@ -146,6 +147,7 @@ export const useApp = create<AppStore>((set, get) => ({
   account: null,
   models: [],
   modelMeta: {},
+  pricing: null,
   selectedModel: '',
   tier: 'standard',
   settings: { defaultFormat: 'png', customFonts: [] },
@@ -233,6 +235,7 @@ export const useApp = create<AppStore>((set, get) => ({
         const m = await api.models()
         const models = m.data.models || []
         const modelMeta = m.data.meta || {}
+        const pricing = m.data.pricing || null
         const pick = initialModelTier(models, modelMeta)
         const metas = await convMetas()
         const recent = metas[0]
@@ -241,6 +244,7 @@ export const useApp = create<AppStore>((set, get) => ({
           account: { phone: me.data.phone, quota: me.data },
           models,
           modelMeta,
+          pricing,
           selectedModel: pick.model,
           tier: pick.tier,
           settings,
@@ -272,11 +276,13 @@ export const useApp = create<AppStore>((set, get) => ({
     const m = await api.models()
     const models = m.data.models || []
     const modelMeta = m.data.meta || {}
+    const pricing = m.data.pricing || null
     const pick = initialModelTier(models, modelMeta)
     set({
       account: me.ok ? { phone: me.data.phone, quota: me.data } : { phone, quota: me.data },
       models,
       modelMeta,
+      pricing,
       selectedModel: pick.model,
       tier: pick.tier
     })
@@ -340,6 +346,8 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ messages: [...get().messages, userMsg], generating: true, genStatus: '正在生成…', canAbort: true })
 
     const size = ratioKey ? modelSizeFor(ratioKey) : undefined
+    // 所选画质长边：传给后端计高清加点（hdEdge≥阈值时按 pricing.hdSurcharge 加点）
+    const hdEdge = opts?.qualityKey ? qualityLongEdge(opts.qualityKey) : undefined
     // 稳定的 reqId：3 次重试共用同一个，服务端据此幂等去重，避免重复扣费
     const reqId = crypto.randomUUID()
     genReqId = reqId
@@ -349,7 +357,8 @@ export const useApp = create<AppStore>((set, get) => ({
       model,
       initImages: refImages.length ? refImages : undefined,
       mask: opts?.mask,
-      reqId
+      reqId,
+      hdEdge
     }
 
     // 失败自动重试，最多 3 次；额度不足不重试、立即提示充值。
@@ -495,7 +504,7 @@ export const useApp = create<AppStore>((set, get) => ({
       r = { ok: false, status: 0, data: { error: '网络异常' } }
     }
     if (r.status === 402 || r.data?.needRecharge) {
-      set({ messages: [...get().messages, { role: 'assistant', content: '⚠️ 额度已用完，请开通/升级或邀请好友得免费次数。' }], generating: false, genStatus: '', needRecharge: true })
+      set({ messages: [...get().messages, { role: 'assistant', content: '⚠️ 点数已用完，请开通/升级或邀请好友得免费点数。' }], generating: false, genStatus: '', needRecharge: true })
       return
     }
     if (r.ok && r.data?.reply) {

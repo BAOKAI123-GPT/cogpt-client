@@ -60,7 +60,10 @@ export default function App(): JSX.Element {
     )
 
   const q = account.quota
-  const creditLabel = q.memberActive ? `${q.memberCredits} 次` : `免费 ${q.freeRemaining}/${q.freeDaily}`
+  // 余额单位已改为「点」（后端方案B：1 旧额度=10 点）。会员显示剩余点数；免费用户显示今日免费点数。
+  const creditLabel = q.memberActive
+    ? `${q.memberCredits} 点`
+    : `免费 ${q.freeRemaining}/${q.freeDaily} 点`
 
   return (
     <div className="h-full flex app-bg">

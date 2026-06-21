@@ -94,7 +94,7 @@ export function Membership({ onClose }: { onClose: () => void }): JSX.Element {
               <div className="text-sm opacity-90">会员 · {q.memberTier}</div>
               <div className="text-3xl font-bold mt-1">
                 {q.memberCredits}
-                <span className="text-base font-normal opacity-90"> 次剩余</span>
+                <span className="text-base font-normal opacity-90"> 点剩余</span>
               </div>
               {q.memberExpiresAt && (
                 <div className="text-xs opacity-80 mt-1">
@@ -107,9 +107,9 @@ export function Membership({ onClose }: { onClose: () => void }): JSX.Element {
               <div className="text-sm opacity-90">免费用户</div>
               <div className="text-3xl font-bold mt-1">
                 {q?.freeRemaining ?? 0}
-                <span className="text-base font-normal opacity-90"> / {q?.freeDaily ?? 0} 今日免费</span>
+                <span className="text-base font-normal opacity-90"> / {q?.freeDaily ?? 0} 点今日免费</span>
               </div>
-              <div className="text-xs opacity-80 mt-1">开通会员获得更多生图次数 · 生图失败不扣次数</div>
+              <div className="text-xs opacity-80 mt-1">开通会员获得更多点数 · 生图失败不扣点</div>
             </>
           )}
         </div>
@@ -133,7 +133,7 @@ export function Membership({ onClose }: { onClose: () => void }): JSX.Element {
                   <Check size={16} className="text-brand" />
                   <div className="flex-1">
                     <div className="text-sm font-medium">{t.name}</div>
-                    <div className="text-[11px] text-gray-500">每月 {t.quota} 次生图</div>
+                    <div className="text-[11px] text-gray-500">每月 {t.quota} 点</div>
                   </div>
                   <div className="text-sm text-gray-200">¥{(t.priceCents / 100).toFixed(2)}/月</div>
                   <button
@@ -148,7 +148,7 @@ export function Membership({ onClose }: { onClose: () => void }): JSX.Element {
             </div>
             {err && <p className="text-xs text-red-400 mt-2">{err}</p>}
             <p className="text-[11px] text-gray-500 mt-3">
-              点「去支付」用支付宝扫码付款，到账后额度自动发放。生图失败不扣次数。
+              点「去支付」用支付宝扫码付款，到账后点数自动发放。生图失败不扣点。
             </p>
           </>
         )}
@@ -173,7 +173,7 @@ function PayView({
       <div className="flex flex-col items-center text-center py-6">
         <CheckCircle2 size={56} className="text-emerald-400 mb-3" />
         <div className="text-lg font-semibold">支付成功</div>
-        <div className="text-sm text-gray-400 mt-1">会员额度已到账，开始生图吧！</div>
+        <div className="text-sm text-gray-400 mt-1">会员点数已到账，开始生图吧！</div>
         <button className="btn-primary mt-5 px-6" onClick={onClose}>
           完成
         </button>

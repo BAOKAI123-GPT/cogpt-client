@@ -17,14 +17,24 @@ async function req(path: string, opts: RequestInit = {}): Promise<any> {
   return { ok: r.ok, status: r.status, data }
 }
 
-// 每个模型的元信息：档位(standard/quality)、本次扣额度、是否支持参考图。
-// 由后端 /api/models 的 meta 字段驱动，前端据此做两档 UI、额度提示与参考图入口显隐。
+// 每个模型的元信息：档位(standard/quality)、本次扣点数、是否支持参考图。
+// 由后端 /api/models 的 meta 字段驱动，前端据此做两档 UI、点数提示与参考图入口显隐。
+// credits 为点数制（标准=10、高质量GPT=20、Gemini/NanoBanana=30）。
 export interface ModelMetaItem {
   mode: 'standard' | 'quality'
   credits: number
   ref: boolean
 }
 export type ModelMeta = Record<string, ModelMetaItem>
+
+// 动态扣点定价规则（后端 /api/models 的 pricing 字段）。
+//  - refExtraPoints：多张参考图时，每多 1 张（>1 张）加的点数。
+//  - hdSurcharge：高清加点，key 为长边阈值（字符串像素值），value 为加点；
+//    按所选画质长边 hdEdge，取 hdEdge≥阈值的最大加点。
+export interface Pricing {
+  refExtraPoints: number
+  hdSurcharge: Record<string, number>
+}
 
 export interface Quota {
   memberActive: boolean
@@ -52,7 +62,7 @@ export const api = {
     req('/api/chat', { method: 'POST', body: JSON.stringify({ messages }) }),
   cancelGenerate: (reqId: string): Promise<{ ok: boolean; status: number; data: any }> =>
     req('/api/generate/cancel', { method: 'POST', body: JSON.stringify({ reqId }) }),
-  models: (): Promise<{ ok: boolean; data: { models: string[]; meta?: ModelMeta } }> =>
+  models: (): Promise<{ ok: boolean; data: { models: string[]; meta?: ModelMeta; pricing?: Pricing } }> =>
     req('/api/models'),
   tiers: (): Promise<{
     ok: boolean
@@ -65,6 +75,7 @@ export const api = {
     initImages?: string[]
     mask?: string
     reqId?: string
+    hdEdge?: number // 所选画质长边像素，服务端据此计算高清加点；局部重绘按原图尺寸故不传
   }, signal?: AbortSignal): Promise<{
     ok: boolean
     status: number
