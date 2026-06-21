@@ -24,6 +24,8 @@ export interface ModelMetaItem {
   mode: 'standard' | 'quality'
   credits: number
   ref: boolean
+  // 后端 Config 驱动的友好名（如「极速(约6秒)」「通义·中文准」「高质量GPT」）。优先用它展示。
+  label?: string
 }
 export type ModelMeta = Record<string, ModelMetaItem>
 

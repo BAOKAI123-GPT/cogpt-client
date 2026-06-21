@@ -48,7 +48,10 @@ const MODEL_LABELS: Record<string, string> = {
   'gpt-image-1.5': '高清'
 }
 function modelLabel(m: string, meta?: ModelMeta): string {
-  // 后端 meta 没有提供 label 字段时，按本地映射；对未知 quality 模型给出「高质量」兜底名
+  // 优先用后端 Config 驱动的友好名（label），新上的 z-image-turbo / qwen-image-max 等据此显示。
+  // 后端没给 label 时，回退本地映射；再按 mode 给「标准 / 高质量」兜底；最后回退裸 id。
+  const lbl = meta?.[m]?.label
+  if (lbl) return lbl
   if (MODEL_LABELS[m]) return MODEL_LABELS[m]
   const mode = meta?.[m]?.mode
   if (mode === 'standard') return '标准'
