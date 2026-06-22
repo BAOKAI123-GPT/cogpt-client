@@ -460,9 +460,12 @@ export const useApp = create<AppStore>((set, get) => ({
         )
       }
     }
-    // 后端返回 fallback=true 时：所选高质量模型繁忙失败，已自动用「极速」模型补出这张图，告知用户风格可能略有不同。
+    // 后端返回 fallback=true 时：所选模型繁忙失败、已自动用「极速」模型补出这张图。
+    // approx=true 表示是「按参考图描述生成的近似图」（参考图通道都失败的兜底，非精确改图）。
     const note = res!.data.fallback
-      ? '⚡ 高质量模型当前繁忙，已用「极速」模型为你生成（风格可能略有不同）'
+      ? res!.data.approx
+        ? '⚡ 参考图通道繁忙，已根据图片描述生成「近似图」（非精确改图，仅供参考）'
+        : '⚡ 高质量模型当前繁忙，已用「极速」模型为你生成（风格可能略有不同）'
       : undefined
     const assistant: ChatMessage = { role: 'assistant', content: res!.data.text ?? '', images, note }
     const patch: Partial<AppStore> = { messages: [...get().messages, assistant], generating: false, genStatus: '' }

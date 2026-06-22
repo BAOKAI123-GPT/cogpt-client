@@ -43,7 +43,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.huiyi.app')
+  electronApp.setAppUserModelId('com.cogpt.app') // 与 electron-builder.yml appId 对齐，修 Win 任务栏分组/通知归属
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
