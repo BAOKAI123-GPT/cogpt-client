@@ -135,6 +135,11 @@ interface AppStore {
   chatSend: (text: string) => Promise<void>
   addAssistantImage: (dataUrl: string) => void // 局部重绘结果同步进聊天
 
+  // 从应用任意位置拖入的图片（App 根级 drop 收集），待 ChatView 消费为参考图
+  pendingRefs: string[]
+  addPendingRefs: (urls: string[]) => void
+  clearPendingRefs: () => void
+
   canAbort: boolean // 生图进行中、可中止
   abortGenerate: () => void
 }
@@ -160,6 +165,7 @@ export const useApp = create<AppStore>((set, get) => ({
   update: null,
   chatMode: false,
   canAbort: false,
+  pendingRefs: [],
   convId: uid(),
   convList: [],
   historyOpen: false,
@@ -480,6 +486,10 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ messages: [...get().messages, { role: 'assistant', content: '（局部重绘）', images: [dataUrl] }] })
     void get().persistConv()
   },
+
+  // 全局拖入图片：收集后切到对话生图页（关对话模式），由 ChatView 消费为参考图
+  addPendingRefs: (urls) => { if (urls.length) set({ pendingRefs: [...get().pendingRefs, ...urls].slice(-6), view: 'chat', chatMode: false }) },
+  clearPendingRefs: () => set({ pendingRefs: [] }),
 
   async chatSend(input) {
     const p = input.trim()

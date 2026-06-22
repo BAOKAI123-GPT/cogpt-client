@@ -78,6 +78,8 @@ export function ChatView(): JSX.Element {
   const chatSend = useApp((s) => s.chatSend)
   const canAbort = useApp((s) => s.canAbort)
   const abortGenerate = useApp((s) => s.abortGenerate)
+  const pendingRefs = useApp((s) => s.pendingRefs)
+  const clearPendingRefs = useApp((s) => s.clearPendingRefs)
 
   const [text, setText] = useState('')
   const [continueEdit, setContinueEdit] = useState(false)
@@ -155,6 +157,15 @@ export function ChatView(): JSX.Element {
     if (!refAllowed && refs.length) setRefs([])
   }, [refAllowed, refs.length])
 
+  // 消费从应用任意位置拖入的图片（App 根级 drop 收集）：标准档先切到高质量档，再加入参考图
+  useEffect(() => {
+    if (!pendingRefs.length) return
+    if (!refAllowed) { setTier('quality'); return }
+    addRefs(pendingRefs)
+    clearPendingRefs()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRefs, refAllowed])
+
   function addRefs(urls: string[]): void {
     if (urls.length) setRefs((prev) => [...prev, ...urls].slice(0, 6))
   }
@@ -203,6 +214,7 @@ export function ChatView(): JSX.Element {
       }}
       onDrop={async (e) => {
         e.preventDefault()
+        e.stopPropagation()
         setDragOver(false)
         addRefs(await extractImages(e.dataTransfer))
       }}
@@ -608,12 +620,12 @@ function ImageCard({
       className="group relative rounded-xl overflow-hidden border border-edge bg-black/30 block text-left"
       onClick={() => onEdit(dataUrl)}
       onContextMenu={(e) => onContextImage(e, dataUrl)}
-      title="点开编辑（右键可引用/保存）"
+      title="点击查看大图（查看器内可局部重绘 / 绘制；右键可引用/保存）"
     >
       <img src={dataUrl} className="max-w-sm max-h-80 object-contain block" />
       <div className="absolute bottom-0 inset-x-0 flex gap-2 p-2 bg-gradient-to-t from-black/70 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
         <span className="btn-primary py-1.5 px-2.5 text-xs pointer-events-none">
-          <Wand2 size={14} /> 点开编辑
+          <Wand2 size={14} /> 查看 / 编辑
         </span>
         <span
           onClick={(e) => {

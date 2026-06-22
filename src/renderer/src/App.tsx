@@ -6,6 +6,7 @@ import { ConversationDrawer } from './components/ConversationDrawer'
 import { UpdateModal } from './components/UpdateModal'
 import { LoginView } from './views/LoginView'
 import { ChatView } from './views/ChatView'
+import { extractImages } from './lib/files'
 import { ResourceLibrary } from './views/ResourceLibrary'
 import { EditorView } from './views/EditorView'
 import { SettingsView } from './views/SettingsView'
@@ -29,6 +30,7 @@ export default function App(): JSX.Element {
   const dismissUpdate = useApp((s) => s.dismissUpdate)
   const setHistoryOpen = useApp((s) => s.setHistoryOpen)
   const newConversation = useApp((s) => s.newConversation)
+  const addPendingRefs = useApp((s) => s.addPendingRefs)
   const [showMember, setShowMember] = useState(false)
 
   useEffect(() => {
@@ -66,7 +68,16 @@ export default function App(): JSX.Element {
     : `免费 ${q.freeRemaining}/${q.freeDaily} 点`
 
   return (
-    <div className="h-full flex app-bg">
+    <div
+      className="h-full flex app-bg"
+      onDragOver={(e) => { if (view !== 'editor' && Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault() }}
+      onDrop={async (e) => {
+        // 编辑区有自己的拖拽处理；其余任意位置拖入图片→自动作为参考图（聊天区由 ChatView 自行拦截处理）
+        if (view === 'editor') return
+        const imgs = await extractImages(e.dataTransfer)
+        if (imgs.length) { e.preventDefault(); addPendingRefs(imgs) }
+      }}
+    >
       <nav className="w-[92px] shrink-0 bg-black/20 backdrop-blur border-r border-white/5 flex flex-col items-center py-4 gap-1.5">
         <div
           className="mb-4 w-11 h-11 rounded-2xl grid place-items-center text-white shadow-lg"

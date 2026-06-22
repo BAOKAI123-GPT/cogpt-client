@@ -27,6 +27,14 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  // 防止把外部文件/图片从聊天软件等拖进窗口时，Electron 直接导航到 file:// 把整个应用页面替换掉（经典坑）。
+  // 拖拽添加参考图由渲染层的 drop 监听处理，这里一律拦截真实导航（dev 下放行 HMR 用的本地地址）。
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    const devUrl = process.env['ELECTRON_RENDERER_URL']
+    if (is.dev && devUrl && url.startsWith(devUrl)) return
+    e.preventDefault()
+  })
+
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
