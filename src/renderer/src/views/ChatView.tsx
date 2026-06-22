@@ -355,28 +355,37 @@ export function ChatView(): JSX.Element {
                     <span className="text-amber-300/80 font-normal"> （{modelLabel(selectedModel, modelMeta)} 仅 3 比例，9:16 等请切高质量）</span>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {RATIOS.map((r) => {
-                    const ok = ratioSupported(selectedModel, r.key)
-                    return (
-                      <button
-                        key={r.key}
-                        disabled={!ok}
-                        title={ok ? '' : '当前模型不支持该比例'}
-                        onClick={() => ok && setRatio(r.key)}
-                        className={`px-2 py-1 rounded text-xs ${
-                          !ok
-                            ? 'opacity-30 line-through cursor-not-allowed bg-white/5'
-                            : r.key === ratio
-                              ? 'bg-brand text-white'
-                              : 'bg-white/5 hover:bg-white/10'
-                        }`}
-                      >
-                        {r.key}
-                      </button>
-                    )
-                  })}
-                </div>
+                {(['方形', '竖版', '横版'] as const).map((g) => (
+                  <div key={g} className="flex items-center gap-2 mb-1.5">
+                    <span
+                      className={`text-xs font-bold shrink-0 w-8 ${g === '方形' ? 'text-violet-300' : g === '竖版' ? 'text-cyan-300' : 'text-amber-300'}`}
+                    >
+                      {g}
+                    </span>
+                    <div className="flex flex-wrap gap-1.5 flex-1">
+                      {RATIOS.filter((r) => r.group === g).map((r) => {
+                        const ok = ratioSupported(selectedModel, r.key)
+                        return (
+                          <button
+                            key={r.key}
+                            disabled={!ok}
+                            title={ok ? '' : '当前模型不支持该比例'}
+                            onClick={() => ok && setRatio(r.key)}
+                            className={`px-2 py-1 rounded text-xs ${
+                              !ok
+                                ? 'opacity-30 line-through cursor-not-allowed bg-white/5'
+                                : r.key === ratio
+                                  ? 'bg-brand text-white'
+                                  : 'bg-white/5 hover:bg-white/10'
+                            }`}
+                          >
+                            {r.key}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
 
               {/* 画质（高清化：本地等比放大，越高越清越慢） */}
