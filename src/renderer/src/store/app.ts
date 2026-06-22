@@ -367,55 +367,45 @@ export const useApp = create<AppStore>((set, get) => ({
       hdEdge
     }
 
-    // 失败自动重试，最多 3 次；额度不足不重试、立即提示充值。
-    const MAX = 3
+    // 异步保活：提交后台生成 → 每 3s 轮询，单次持续直到出图/失败/取消（取消多次重试，穿透 Cloudflare ~100s）。
     type GenRes = Awaited<ReturnType<typeof api.generate>>
     let res: GenRes | null = null
     let lastErr = '生成失败，请稍后再试'
-    for (let attempt = 1; attempt <= MAX; attempt++) {
-      if (attempt > 1) set({ genStatus: `生成失败，正在自动重试 (${attempt}/${MAX})…` })
-      try {
-        res = await api.generate(reqBody, ac.signal)
-      } catch {
-        res = { ok: false, status: 0, data: { error: '网络异常，无法连接服务器' } } as GenRes
-      }
-      if (ac.signal.aborted) break // 用户中止，不再重试
-      // 额度不足：不重试，直接提示
-      if (res.status === 402 || res.data?.needRecharge) {
-        genAC = null
-        set({
-          messages: [...get().messages, { role: 'assistant', content: '⚠️ 额度已用完，请开通或升级会员后再试。' }],
-          generating: false,
-          genStatus: '',
-          canAbort: false,
-          needRecharge: true
-        })
-        return
-      }
-      // 校验/审核类错误（如提示词为空、内容违规）：重试也没用，直接提示
-      if (res.status === 400) {
-        genAC = null
-        set({
-          messages: [...get().messages, { role: 'assistant', content: `⚠️ ${res.data?.error ?? '请求有误，请修改后重试'}` }],
-          generating: false,
-          genStatus: '',
-          canAbort: false
-        })
-        return
-      }
-      // 忙（上一张还在收尾）：不重试，提示稍候
-      if (res.status === 429) {
-        genAC = null
-        set({
-          messages: [...get().messages, { role: 'assistant', content: `⚠️ ${res.data?.error || '上一张还在收尾，请等几秒再试'}` }],
-          generating: false,
-          genStatus: '',
-          canAbort: false
-        })
-        return
-      }
-      if (res.ok && res.data.images && res.data.images.length) break // 成功，结束重试
-      lastErr = res.data?.error || '生成失败，请稍后再试'
+    let busyMsg = ''
+    let sub: GenRes
+    try {
+      sub = await api.generate({ ...reqBody, async: true }, ac.signal)
+    } catch {
+      sub = { ok: false, status: 0, data: { error: '网络异常，无法连接服务器' } } as GenRes
+    }
+    if (!ac.signal.aborted) {
+      if (sub.status === 429) busyMsg = sub.data?.error || '上一张还在收尾，请等几秒再试'
+      else if (sub.status === 200 && sub.data?.images?.length) res = sub // 提交即命中缓存
+      else if (sub.status === 202 || (sub.data as { accepted?: boolean })?.accepted) {
+        const t0 = Date.now()
+        while (!ac.signal.aborted && Date.now() - t0 < 315_000) {
+          await new Promise((r) => setTimeout(r, 3000))
+          if (ac.signal.aborted) break
+          set({ genStatus: `正在生成…（已 ${Math.round((Date.now() - t0) / 1000)}s，通常 1–3 分钟）· 可中止` })
+          let st: Awaited<ReturnType<typeof api.generateStatus>>
+          try {
+            st = await api.generateStatus(reqId, ac.signal)
+          } catch {
+            continue
+          }
+          if (ac.signal.aborted) break
+          const state = st.data?.state
+          if (state === 'done') {
+            res = { ok: st.data.status === 200, status: st.data.status ?? 0, data: st.data.result || {} } as GenRes
+            break
+          }
+          if (state === 'missing') {
+            lastErr = '生成任务已丢失，请重试'
+            break
+          }
+        }
+        if (!res && !ac.signal.aborted && lastErr === '生成失败，请稍后再试') lastErr = '生成超时了，请重试或换个模型'
+      } else lastErr = sub.data?.error || lastErr
     }
 
     genAC = null
@@ -431,14 +421,25 @@ export const useApp = create<AppStore>((set, get) => ({
       return
     }
     set({ canAbort: false })
-
+    // 忙（上一张还在收尾，达并发上限）
+    if (busyMsg) {
+      set({ messages: [...get().messages, { role: 'assistant', content: `⚠️ ${busyMsg}` }], generating: false, genStatus: '', canAbort: false })
+      return
+    }
+    // 额度不足
+    if (res && (res.status === 402 || res.data?.needRecharge)) {
+      set({ messages: [...get().messages, { role: 'assistant', content: '⚠️ 额度已用完，请开通或升级会员后再试。' }], generating: false, genStatus: '', canAbort: false, needRecharge: true })
+      return
+    }
+    // 校验/审核类错误
+    if (res && res.status === 400) {
+      set({ messages: [...get().messages, { role: 'assistant', content: `⚠️ ${res.data?.error ?? '请求有误，请修改后重试'}` }], generating: false, genStatus: '', canAbort: false })
+      return
+    }
     const success = !!(res && res.ok && res.data.images && res.data.images.length)
     if (!success) {
       set({
-        messages: [
-          ...get().messages,
-          { role: 'assistant', content: `⚠️ ${lastErr}（已自动重试 ${MAX} 次仍失败，请稍后再试）` }
-        ],
+        messages: [...get().messages, { role: 'assistant', content: `⚠️ ${res?.data?.error || lastErr}` }],
         generating: false,
         genStatus: ''
       })
@@ -491,7 +492,7 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   // 全局拖入图片：收集后切到对话生图页（关对话模式），由 ChatView 消费为参考图
-  addPendingRefs: (urls) => { if (urls.length) set({ pendingRefs: [...get().pendingRefs, ...urls].slice(-6), view: 'chat', chatMode: false }) },
+  addPendingRefs: (urls) => { if (urls.length) set({ pendingRefs: [...get().pendingRefs, ...urls].slice(-8), view: 'chat', chatMode: false }) },
   clearPendingRefs: () => set({ pendingRefs: [] }),
 
   async chatSend(input) {

@@ -15,7 +15,7 @@ import {
 import { useApp } from '../store/app'
 import type { ChatMessage } from '@shared/types'
 import type { ModelMeta } from '../lib/api'
-import { extractImages } from '../lib/files'
+import { extractImages, compressDataUrl } from '../lib/files'
 import { nextImgName } from '../lib/imgname'
 import { ImageEditModal } from '../components/ImageEditModal'
 import {
@@ -167,7 +167,9 @@ export function ChatView(): JSX.Element {
   }, [pendingRefs, refAllowed])
 
   function addRefs(urls: string[]): void {
-    if (urls.length) setRefs((prev) => [...prev, ...urls].slice(0, 6))
+    if (!urls.length) return
+    // 统一压缩后入参考图（openMany/拖拽/粘贴/引用 都经此），上限 8 张
+    void Promise.all(urls.map((u) => compressDataUrl(u))).then((cs) => setRefs((prev) => [...prev, ...cs].slice(0, 8)))
   }
 
   async function pickRefs(): Promise<void> {

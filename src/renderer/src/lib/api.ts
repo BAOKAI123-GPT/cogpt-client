@@ -64,6 +64,12 @@ export const api = {
     req('/api/chat', { method: 'POST', body: JSON.stringify({ messages }) }),
   cancelGenerate: (reqId: string): Promise<{ ok: boolean; status: number; data: any }> =>
     req('/api/generate/cancel', { method: 'POST', body: JSON.stringify({ reqId }) }),
+  // 异步生图轮询：提交(async:true)后每隔几秒查状态。state: running / done(带 status+result) / missing。
+  generateStatus: (
+    reqId: string,
+    signal?: AbortSignal
+  ): Promise<{ ok: boolean; status: number; data: { state?: 'running' | 'done' | 'missing'; status?: number; result?: any } }> =>
+    req('/api/generate/status', { method: 'POST', body: JSON.stringify({ reqId }), signal }),
   models: (): Promise<{ ok: boolean; data: { models: string[]; meta?: ModelMeta; pricing?: Pricing } }> =>
     req('/api/models'),
   tiers: (): Promise<{
@@ -78,6 +84,7 @@ export const api = {
     mask?: string
     reqId?: string
     hdEdge?: number // 所选画质长边像素，服务端据此计算高清加点；局部重绘按原图尺寸故不传
+    async?: boolean // true=提交后台+轮询(穿透 Cloudflare ~100s)；不传=同步
   }, signal?: AbortSignal): Promise<{
     ok: boolean
     status: number
