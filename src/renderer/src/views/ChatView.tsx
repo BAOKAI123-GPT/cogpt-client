@@ -93,7 +93,7 @@ export function ChatView(): JSX.Element {
   const [dragOver, setDragOver] = useState(false)
   const [designPreview, setDesignPreview] = useState<boolean>(() => { try { return localStorage.getItem('cogpt_design_preview') !== '0' } catch { return true } })
   // 即梦式：单行控件 + 点开「设置」弹层放详细项（档位/模型/比例/画质）
-  const [panel, setPanel] = useState<'set' | null>(null)
+  const [panel, setPanel] = useState<'model' | 'ratio' | 'hd' | null>(null)
   const [editImage, setEditImage] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; items: { label: string; fn: () => void }[] } | null>(null)
   const format = useApp((s) => s.settings.defaultFormat)
@@ -145,9 +145,6 @@ export function ChatView(): JSX.Element {
     pricing: pricing ?? undefined
   })
   const hasExtra = estPoints > curMeta.credits
-  // 设置按钮上的摘要：档位 · 比例 · 画质（如「高质量 · 1:1 · 高清」）
-  const qualityLabel = (QUALITIES.find((q) => q.key === quality) ?? QUALITIES[1]).label
-  const setSummary = `${isStd ? '标准' : '高质量'} · ${ratio} · ${qualityLabel}`
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -349,126 +346,60 @@ export function ChatView(): JSX.Element {
             </div>
           )}
 
-          {/* 设置弹层（即梦式：把标准/高质量档 + 高质量模型 + 比例 + 画质收进一个紧凑面板，点「设置」从下方弹起） */}
-          {!chatMode && !designMode && panel === 'set' && (
+          {/* 豆包式独立面板：模型 / 比例 / 画质 各自一个 chip 点开 */}
+          {!chatMode && !designMode && panel === 'model' && (
             <div className="card p-3 mb-2 space-y-3">
-              {/* 档位：标准 / 高质量 */}
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-gray-400 w-12 shrink-0">画质档</span>
                 <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
-                  <button
-                    className={`px-3 py-1.5 ${isStd ? 'bg-brand text-white' : 'text-gray-400'}`}
-                    onClick={() => setTier('standard')}
-                  >
-                    标准
-                  </button>
-                  <button
-                    className={`px-3 py-1.5 ${!isStd ? 'bg-brand text-white' : 'text-gray-400'}`}
-                    onClick={() => setTier('quality')}
-                  >
-                    高质量
-                  </button>
+                  <button className={`px-3 py-1.5 ${isStd ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setTier('standard')}>标准</button>
+                  <button className={`px-3 py-1.5 ${!isStd ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setTier('quality')}>高质量</button>
                 </div>
-                <span className="text-[11px] text-gray-500">
-                  本次{hasExtra ? '约扣' : '扣'} <b className="text-gray-300">{estPoints}</b> 点
-                  {isStd ? '（通用 3 比例）' : '（可换模型 / 参考图 / 全比例）'}
-                </span>
+                <span className="text-[11px] text-gray-500">本次{hasExtra ? '约扣' : '扣'} <b className="text-gray-300">{estPoints}</b> 点{isStd ? '（通用 3 比例）' : '（可换模型 / 参考图 / 全比例）'}</span>
               </div>
-
-              {/* 高质量档：展开 高质量GPT / Nano Banana 选择 */}
               {!isStd && qModels.length > 1 && (
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs text-gray-400 w-12 shrink-0">模型</span>
                   {qModels.map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setSelectedModel(m)}
-                      className={`px-2.5 py-1 rounded-md text-xs ${
-                        m === selectedModel ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'
-                      }`}
-                    >
-                      {modelLabel(m, modelMeta)}
-                    </button>
+                    <button key={m} onClick={() => setSelectedModel(m)} className={`px-2.5 py-1 rounded-md text-xs ${m === selectedModel ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'}`}>{modelLabel(m, modelMeta)}</button>
                   ))}
                 </div>
               )}
-
-              {/* 比例 */}
-              <div>
-                <div className="text-xs text-gray-400 mb-1.5">
-                  比例
-                  {!modelSupportsAnyRatio(selectedModel) && (
-                    <span className="text-amber-300/80 font-normal"> （{modelLabel(selectedModel, modelMeta)} 仅 3 比例，9:16 等请切高质量）</span>
-                  )}
-                </div>
-                {(['方形', '竖版', '横版'] as const).map((g) => (
-                  <div key={g} className="flex items-center gap-2 mb-1.5">
-                    <span
-                      className={`text-xs font-bold shrink-0 w-8 ${g === '方形' ? 'text-violet-300' : g === '竖版' ? 'text-cyan-300' : 'text-amber-300'}`}
-                    >
-                      {g}
-                    </span>
-                    <div className="flex flex-wrap gap-1.5 flex-1">
-                      {RATIOS.filter((r) => r.group === g).map((r) => {
-                        const ok = ratioSupported(selectedModel, r.key)
-                        return (
-                          <button
-                            key={r.key}
-                            disabled={!ok}
-                            title={ok ? '' : '当前模型不支持该比例'}
-                            onClick={() => ok && setRatio(r.key)}
-                            className={`px-2 py-1 rounded text-xs ${
-                              !ok
-                                ? 'opacity-30 line-through cursor-not-allowed bg-white/5'
-                                : r.key === ratio
-                                  ? 'bg-brand text-white'
-                                  : 'bg-white/5 hover:bg-white/10'
-                            }`}
-                          >
-                            {r.key}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* 画质（高清化：本地等比放大，越高越清越慢） */}
-              <div>
-                <div className="text-xs text-gray-400 mb-1.5">画质（生成后本地放大，越高越清越慢）</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {QUALITIES.map((q) => (
-                    <button
-                      key={q.key}
-                      onClick={() => setQuality(q.key)}
-                      title={q.hint}
-                      className={`px-2.5 py-1 rounded text-xs ${
-                        q.key === quality ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'
-                      }`}
-                    >
-                      {q.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 基于上一张继续改 */}
               {refAllowed && (
                 <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={continueEdit}
-                    disabled={!lastAssistantImage}
-                    onChange={(e) => setContinueEdit(e.target.checked)}
-                  />
+                  <input type="checkbox" checked={continueEdit} disabled={!lastAssistantImage} onChange={(e) => setContinueEdit(e.target.checked)} />
                   <RefreshCw size={13} /> 基于上一张继续改
                 </label>
               )}
-
-              <p className="text-[10px] text-gray-600">
-                多张参考图、超清（2K/4K）会额外计点；最终扣点以服务端为准。
-              </p>
+              <p className="text-[10px] text-gray-600">多张参考图、超清（2K/4K）会额外计点；最终扣点以服务端为准。</p>
+            </div>
+          )}
+          {!chatMode && !designMode && panel === 'ratio' && (
+            <div className="card p-3 mb-2">
+              <div className="text-xs text-gray-400 mb-1.5">画面比例{!modelSupportsAnyRatio(selectedModel) && (<span className="text-amber-300/80 font-normal"> （{modelLabel(selectedModel, modelMeta)} 仅 3 比例，9:16 等请切高质量）</span>)}</div>
+              {(['竖版', '方形', '横版'] as const).map((g) => (
+                <div key={g} className="flex items-center gap-2 mb-1.5">
+                  <span className={`text-xs font-bold shrink-0 w-8 ${g === '方形' ? 'text-violet-300' : g === '竖版' ? 'text-cyan-300' : 'text-amber-300'}`}>{g}</span>
+                  <div className="flex flex-wrap gap-1.5 flex-1">
+                    {RATIOS.filter((r) => r.group === g).map((r) => {
+                      const ok = ratioSupported(selectedModel, r.key)
+                      return (
+                        <button key={r.key} disabled={!ok} title={ok ? '' : '当前模型不支持该比例'} onClick={() => { if (ok) { setRatio(r.key); setPanel(null) } }} className={`px-2 py-1 rounded text-xs ${!ok ? 'opacity-30 line-through cursor-not-allowed bg-white/5' : r.key === ratio ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>{r.key}</button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {!chatMode && !designMode && panel === 'hd' && (
+            <div className="card p-3 mb-2">
+              <div className="text-xs text-gray-400 mb-1.5">画质（生成后本地放大，越高越清越慢）</div>
+              <div className="flex flex-wrap gap-1.5">
+                {QUALITIES.map((q) => (
+                  <button key={q.key} onClick={() => { setQuality(q.key); setPanel(null) }} title={q.hint} className={`px-2.5 py-1 rounded text-xs ${q.key === quality ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>{q.label}</button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -500,13 +431,13 @@ export function ChatView(): JSX.Element {
               </button>
             )}
             {!chatMode && !designMode && (
-              <button
-                className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'set' ? '!bg-brand !text-white !border-brand' : ''}`}
-                onClick={() => setPanel(panel === 'set' ? null : 'set')}
-                title="档位 / 模型 / 比例 / 画质"
-              >
-                <SlidersHorizontal size={14} /> {setSummary}
-              </button>
+              <>
+                <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'model' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'model' ? null : 'model')}>
+                  <SlidersHorizontal size={14} /> {isStd ? '标准' : modelLabel(selectedModel, modelMeta)} ⌄
+                </button>
+                <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'ratio' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'ratio' ? null : 'ratio')}>{ratio} ⌄</button>
+                <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'hd' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'hd' ? null : 'hd')}>{QUALITIES.find((q) => q.key === quality)?.label || '标准'} ⌄</button>
+              </>
             )}
             {designMode && (
               <button
