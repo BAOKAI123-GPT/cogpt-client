@@ -70,12 +70,15 @@ export const api = {
     signal?: AbortSignal
   ): Promise<{ ok: boolean; status: number; data: { state?: 'running' | 'done' | 'missing'; status?: number; result?: any } }> =>
     req('/api/generate/status', { method: 'POST', body: JSON.stringify({ reqId }), signal }),
-  // 设计工坊：把项目需求拆解成多张图的清单（gpt-5.1 回退 gpt-4o，后端处理）
+  // 设计工坊：把项目需求拆解成多张图的清单（gpt-5.1 回退 gpt-4o，后端处理）。
+  // count：指定目标张数（"让 AI 补足/重排到 N 张"）；adjust：新增/删减/风格等调整意见。
   designPlan: (
     brief: string,
-    refCount?: number
+    refCount?: number,
+    count?: number,
+    adjust?: string
   ): Promise<{ ok: boolean; status: number; data: { ok?: boolean; items?: { title: string; prompt: string; ratio: string }[]; quota?: Quota; error?: string; needRecharge?: boolean } }> =>
-    req('/api/design/plan', { method: 'POST', body: JSON.stringify({ brief, refCount: refCount || 0 }) }),
+    req('/api/design/plan', { method: 'POST', body: JSON.stringify({ brief, refCount: refCount || 0, count: count || 0, adjust: adjust || '' }) }),
   models: (): Promise<{ ok: boolean; data: { models: string[]; meta?: ModelMeta; pricing?: Pricing } }> =>
     req('/api/models'),
   tiers: (): Promise<{
@@ -91,6 +94,7 @@ export const api = {
     reqId?: string
     hdEdge?: number // 所选画质长边像素，服务端据此计算高清加点；局部重绘按原图尺寸故不传
     async?: boolean // true=提交后台+轮询(穿透 Cloudflare ~100s)；不传=同步
+    noFallback?: boolean // true=失败如实失败、不静默换兜底模型补近似图再扣费（设计批量/局部重绘等精确任务）
   }, signal?: AbortSignal): Promise<{
     ok: boolean
     status: number

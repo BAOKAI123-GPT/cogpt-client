@@ -92,6 +92,10 @@ export interface ChatMessage {
   design?: { title: string; prompt: string; ratio: string }[]
   /** 设计工坊：该卡是「点数不足后续生成」卡（充值后继续生成剩余） */
   resume?: boolean
+  /** 一键重新生成：生成这张图所用的提示词/参考图/比例，点按钮即回填输入框复用 */
+  src?: { prompt: string; refs?: string[]; ratio?: string }
+  /** 设计工坊该套方案的原始需求文字，供"让 AI 补足/重排到 N 张"复用 */
+  brief?: string
 }
 
 export interface AppSettings {

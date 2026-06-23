@@ -13,7 +13,8 @@ async function genOneJob(
 ): Promise<{ img?: string; quota?: Quota; err?: string; needRecharge?: boolean }> {
   let sub: Awaited<ReturnType<typeof api.generate>>
   try {
-    sub = await api.generate({ ...reqBody, async: true }, ac.signal)
+    // noFallback：设计批量是精确任务，某张失败就如实失败(不扣费、可重生成)，不静默换兜底模型补近似图还扣费。
+    sub = await api.generate({ ...reqBody, async: true, noFallback: true }, ac.signal)
   } catch {
     return { err: '网络异常' }
   }
@@ -176,6 +177,7 @@ interface AppStore {
   setDesignMode: (v: boolean) => void
   runDesign: (brief: string, preview: boolean, refs?: string[]) => Promise<void>
   genDesign: (items: { title: string; prompt: string; ratio: string }[]) => Promise<void>
+  replanDesign: (brief: string, count: number, adjust: string, refCount: number) => Promise<{ title: string; prompt: string; ratio: string }[] | null>
   addAssistantImage: (dataUrl: string) => void // 局部重绘结果同步进聊天
 
   // 从应用任意位置拖入的图片（App 根级 drop 收集），待 ChatView 消费为参考图
@@ -410,7 +412,9 @@ export const useApp = create<AppStore>((set, get) => ({
       initImages: refImages.length ? refImages : undefined,
       mask: opts?.mask,
       reqId,
-      hdEdge
+      hdEdge,
+      // 局部重绘=精确改图：失败不静默换兜底模型补近似图（近似图无意义且会让用户觉得"白扣费"）。
+      noFallback: opts?.mask ? true : undefined
     }
 
     // 异步保活：提交后台生成 → 每 3s 轮询，单次持续直到出图/失败/取消（取消多次重试，穿透 Cloudflare ~100s）。
@@ -514,7 +518,7 @@ export const useApp = create<AppStore>((set, get) => ({
         ? '⚡ 参考图通道繁忙，已根据图片描述生成「近似图」（非精确改图，仅供参考）'
         : '⚡ 高质量模型当前繁忙，已用「极速」模型为你生成（风格可能略有不同）'
       : undefined
-    const assistant: ChatMessage = { role: 'assistant', content: res!.data.text ?? '', images, note }
+    const assistant: ChatMessage = { role: 'assistant', content: res!.data.text ?? '', images, note, src: { prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey } }
     const patch: Partial<AppStore> = { messages: [...get().messages, assistant], generating: false, genStatus: '' }
     if (res!.data.quota) {
       const acc = get().account
@@ -554,8 +558,18 @@ export const useApp = create<AppStore>((set, get) => ({
     }
     await get().refreshMe()
     const items = r.data.items
-    if (preview) set({ messages: [...get().messages, { role: 'assistant', content: '', design: items }] })
+    if (preview) set({ messages: [...get().messages, { role: 'assistant', content: '', design: items, brief: p }] })
     else await get().genDesign(items)
+  },
+
+  // 设计工坊"让 AI 补足/重排到 N 张"：带 count+adjust 重新拆解，返回新清单给方案卡替换（不直接改 messages）。
+  async replanDesign(brief, count, adjust, refCount) {
+    let r: Awaited<ReturnType<typeof api.designPlan>>
+    try { r = await api.designPlan(brief, refCount, count, adjust) } catch { return null }
+    if (r.status === 402 || r.data?.needRecharge) { set({ needRecharge: true }); return null }
+    if (!r.ok || !r.data?.items?.length) return null
+    await get().refreshMe()
+    return r.data.items
   },
 
   async genDesign(items) {
@@ -591,7 +605,8 @@ export const useApp = create<AppStore>((set, get) => ({
         break
       }
       if (r.img) {
-        set({ messages: [...get().messages, { role: 'assistant', content: '', images: [r.img], note: `【${items[i].title}】${items[i].ratio}` }] })
+        const it = items[i]
+        set({ messages: [...get().messages, { role: 'assistant', content: '', images: [r.img], note: `【${it.title}】${it.ratio}`, src: { prompt: it.prompt, refs: designRefs.length ? designRefs : undefined, ratio: it.ratio } }] })
         doneN++
       } else {
         set({ messages: [...get().messages, { role: 'assistant', content: `⚠️ 第 ${i + 1} 张「${items[i].title}」生成失败：${r.err}` }] })

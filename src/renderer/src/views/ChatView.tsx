@@ -80,6 +80,7 @@ export function ChatView(): JSX.Element {
   const setDesignMode = useApp((s) => s.setDesignMode)
   const runDesign = useApp((s) => s.runDesign)
   const genDesign = useApp((s) => s.genDesign)
+  const replanDesign = useApp((s) => s.replanDesign)
   const canAbort = useApp((s) => s.canAbort)
   const abortGenerate = useApp((s) => s.abortGenerate)
   const pendingRefs = useApp((s) => s.pendingRefs)
@@ -93,7 +94,7 @@ export function ChatView(): JSX.Element {
   const [dragOver, setDragOver] = useState(false)
   const [designPreview, setDesignPreview] = useState<boolean>(() => { try { return localStorage.getItem('cogpt_design_preview') !== '0' } catch { return true } })
   // 即梦式：单行控件 + 点开「设置」弹层放详细项（档位/模型/比例/画质）
-  const [panel, setPanel] = useState<'model' | 'ratio' | 'hd' | null>(null)
+  const [panel, setPanel] = useState<'model' | 'ratio' | 'hd' | 'preview' | null>(null)
   const [editImage, setEditImage] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; items: { label: string; fn: () => void }[] } | null>(null)
   const format = useApp((s) => s.settings.defaultFormat)
@@ -129,6 +130,16 @@ export function ChatView(): JSX.Element {
         { label: '保存图片', fn: () => window.api.image.save({ dataUrl, format, defaultName: nextImgName(format) }) }
       ]
     })
+  }
+
+  // 一键重新生成：把这张图所用的提示词/参考图/比例回填到输入框（切回生图模式，有参考图自动切可参考图模型）。
+  function onRegen(src: { prompt: string; refs?: string[]; ratio?: string }): void {
+    setChatMode(false); setDesignMode(false); setPanel(null); setContinueEdit(false)
+    setText(src.prompt)
+    setRefs(src.refs || [])
+    if (src.refs?.length) { const rm = models.find((m) => modelMeta[m]?.ref); if (rm) setSelectedModel(rm) }
+    if (src.ratio) setRatio(src.ratio)
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }
 
   const lastAssistantImage = [...messages]
@@ -289,33 +300,26 @@ export function ChatView(): JSX.Element {
 
           {messages.map((m, i) =>
             m.design ? (
-              (() => {
-                const per = modelMeta[qModels[0]]?.credits || 20
-                const est = per * m.design.length
-                return (
-                  <div key={i} className="bg-panel/60 border border-edge rounded-2xl rounded-tl-sm px-4 py-3 text-sm max-w-[92%] mb-3 leading-relaxed">
-                    <b>{m.resume ? `点数不足已暂停，充值后可继续生成剩余 ${m.design.length} 张：` : `已把项目拆解为 ${m.design.length} 张，确认后逐张生成：`}</b>
-                    <ol className="list-decimal pl-5 my-2 space-y-1.5">
-                      {m.design.map((d, k) => (
-                        <li key={k}>
-                          <b>{d.title}</b> <span className="text-gray-400">· {d.ratio}</span>
-                          <br />
-                          <span className="text-gray-400 text-[13px]">{d.prompt}</span>
-                        </li>
-                      ))}
-                    </ol>
-                    <div className="text-amber-300 text-[13px] mb-2">预计消耗约 {est} 点（每张约 {per} 点，按成功产出的张数实际扣点）</div>
-                    <button className="btn-primary px-3.5 py-2 text-sm" disabled={generating} onClick={() => genDesign(m.design!)}>
-                      {m.resume ? `💳 我已充值，继续生成剩余 ${m.design.length} 张` : `✅ 确认生成这 ${m.design.length} 张`}
-                    </button>
-                  </div>
-                )
-              })()
+              m.resume ? (
+                <div key={i} className="bg-panel/60 border border-edge rounded-2xl rounded-tl-sm px-4 py-3 text-sm max-w-[92%] mb-3 leading-relaxed">
+                  <b>点数不足已暂停，充值后可继续生成剩余 {m.design.length} 张：</b>
+                  <ol className="list-decimal pl-5 my-2 space-y-1.5">
+                    {m.design.map((d, k) => (
+                      <li key={k}><b>{d.title}</b> <span className="text-gray-400">· {d.ratio}</span><br /><span className="text-gray-400 text-[13px]">{d.prompt}</span></li>
+                    ))}
+                  </ol>
+                  <div className="text-amber-300 text-[13px] mb-2">预计消耗约 {(modelMeta[qModels[0]]?.credits || 10) * m.design.length} 点（每张约 {modelMeta[qModels[0]]?.credits || 10} 点，按成功产出的张数实际扣点）</div>
+                  <button className="btn-primary px-3.5 py-2 text-sm" disabled={generating} onClick={() => genDesign(m.design!)}>💳 我已充值，继续生成剩余 {m.design.length} 张</button>
+                </div>
+              ) : (
+                <DesignCardDesktop key={i} msg={m} generating={generating} per={modelMeta[qModels[0]]?.credits || 10} onGenerate={genDesign} onReplan={replanDesign} />
+              )
             ) : (
               <Bubble
                 key={i}
                 msg={m}
                 onEdit={setEditImage}
+                onRegen={onRegen}
                 onContextText={onContextText}
                 onContextImage={onContextImage}
               />
@@ -403,6 +407,17 @@ export function ChatView(): JSX.Element {
             </div>
           )}
 
+          {/* 设计工坊：出图方式（折叠面板，开/关状态一目了然，避免分不清是否切换成功） */}
+          {designMode && panel === 'preview' && (
+            <div className="card p-3 mb-2">
+              <div className="text-xs text-gray-400 mb-1.5">设计工坊出图方式</div>
+              <div className="flex flex-wrap gap-1.5">
+                <button onClick={() => { setDesignPreview(true); try { localStorage.setItem('cogpt_design_preview', '1') } catch { /* ignore */ }; setPanel(null) }} className={`px-2.5 py-1 rounded text-xs ${designPreview ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>先预览提示词（可逐条编辑/改数量）</button>
+                <button onClick={() => { setDesignPreview(false); try { localStorage.setItem('cogpt_design_preview', '0') } catch { /* ignore */ }; setPanel(null) }} className={`px-2.5 py-1 rounded text-xs ${!designPreview ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>直接生成（不预览）</button>
+              </div>
+            </div>
+          )}
+
           {/* 单行控件：对话/生图 + 参考图 + 设置（即梦式，详细项收进「设置」弹层；窗口窄时自动换行） */}
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
@@ -441,10 +456,10 @@ export function ChatView(): JSX.Element {
             )}
             {designMode && (
               <button
-                className="btn-soft py-1.5 px-2.5 text-xs"
-                onClick={() => { const v = !designPreview; setDesignPreview(v); try { localStorage.setItem('cogpt_design_preview', v ? '1' : '0') } catch { /* ignore */ } }}
+                className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'preview' ? '!bg-brand !text-white !border-brand' : ''}`}
+                onClick={() => setPanel(panel === 'preview' ? null : 'preview')}
               >
-                {designPreview ? '✓ 生成前预览提示词' : '直接生成(不预览)'}
+                {designPreview ? '出图方式：先预览 ⌄' : '出图方式：直接生成 ⌄'}
               </button>
             )}
             {messages.length > 0 && (
@@ -526,11 +541,13 @@ function ProgressCard({ status, onAbort }: { status: string; onAbort?: () => voi
 function Bubble({
   msg,
   onEdit,
+  onRegen,
   onContextText,
   onContextImage
 }: {
   msg: ChatMessage
   onEdit: (d: string) => void
+  onRegen: (src: { prompt: string; refs?: string[]; ratio?: string }) => void
   onContextText: (e: React.MouseEvent, text: string) => void
   onContextImage: (e: React.MouseEvent, dataUrl: string) => void
 }): JSX.Element {
@@ -569,6 +586,11 @@ function Bubble({
         {!isUser && msg.images?.map((img, i) => (
           <ImageCard key={i} dataUrl={img} onEdit={onEdit} onContextImage={onContextImage} />
         ))}
+        {!isUser && msg.src && msg.images && msg.images.length > 0 && (
+          <button onClick={() => onRegen(msg.src!)} className="btn-soft py-1 px-2.5 text-xs self-start flex items-center gap-1">
+            <RefreshCw size={13} /> 一键重新生成（提示词/参考图已回填，可改后再生成）
+          </button>
+        )}
       </div>
     </div>
   )
@@ -621,5 +643,84 @@ function ImageCard({
         </span>
       </div>
     </button>
+  )
+}
+
+const DESIGN_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9']
+
+// 设计工坊批量预览卡（桌面）：每条独立可编辑（标题/提示词原位改 + 比例折叠选择 + 单条确认）+ 底部总量自定义（手动改数 / 让 AI 补足）。
+function DesignCardDesktop({
+  msg,
+  generating,
+  per,
+  onGenerate,
+  onReplan
+}: {
+  msg: ChatMessage
+  generating: boolean
+  per: number
+  onGenerate: (items: { title: string; prompt: string; ratio: string }[]) => void
+  onReplan: (brief: string, count: number, adjust: string, refCount: number) => Promise<{ title: string; prompt: string; ratio: string }[] | null>
+}): JSX.Element {
+  const [items, setItems] = useState(() => (msg.design || []).map((d) => ({ ...d })))
+  const [confirmed, setConfirmed] = useState<boolean[]>(() => (msg.design || []).map(() => false))
+  const [openRatio, setOpenRatio] = useState<number | null>(null)
+  const [count, setCount] = useState(String((msg.design || []).length))
+  const [adjust, setAdjust] = useState('')
+  const [replanBusy, setReplanBusy] = useState(false)
+  const brief = msg.brief || ''
+  function setItem(i: number, patch: Partial<{ title: string; prompt: string; ratio: string }>): void { setItems((p) => p.map((d, k) => (k === i ? { ...d, ...patch } : d))) }
+  function delItem(i: number): void { setItems((p) => p.filter((_, k) => k !== i)); setConfirmed((p) => p.filter((_, k) => k !== i)); setCount((c) => String(Math.max(1, (parseInt(c) || items.length) - 1))) }
+  function manualCount(): void {
+    const n = Math.max(1, Math.min(20, parseInt(count) || items.length))
+    setItems((p) => n <= p.length ? p.slice(0, n) : [...p, ...Array.from({ length: n - p.length }, (_, k) => ({ title: `新增画面 ${p.length + k + 1}`, prompt: adjust.trim(), ratio: '1:1' }))])
+    setConfirmed((p) => Array.from({ length: n }, (_, k) => p[k] || false))
+    setCount(String(n))
+  }
+  async function aiReplan(): Promise<void> {
+    const n = Math.max(1, Math.min(20, parseInt(count) || items.length))
+    setReplanBusy(true)
+    const next = await onReplan(brief, n, adjust.trim(), 0)
+    setReplanBusy(false)
+    if (next && next.length) { setItems(next.map((d) => ({ ...d }))); setConfirmed(next.map(() => false)); setCount(String(next.length)); setAdjust('') }
+  }
+  return (
+    <div className="bg-panel/60 border border-edge rounded-2xl rounded-tl-sm px-4 py-3 text-sm max-w-[92%] mb-3 leading-relaxed">
+      <b>已把项目拆解为 {items.length} 张，可逐条改提示词/比例，确认后统一生成：</b>
+      <div className="my-2.5 flex flex-col gap-2.5">
+        {items.map((d, i) => (
+          <div key={i} className={`border border-edge rounded-lg p-2.5 ${confirmed[i] ? 'bg-emerald-400/5' : 'bg-black/20'}`}>
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-xs text-gray-500 shrink-0">#{i + 1}</span>
+              <input value={d.title} onChange={(e) => setItem(i, { title: e.target.value })} className="field flex-1 py-1 px-2 text-[13px] font-semibold" />
+              <button onClick={() => setOpenRatio(openRatio === i ? null : i)} className="btn-soft py-1 px-2 text-xs shrink-0">{d.ratio} ⌄</button>
+              <button onClick={() => delItem(i)} title="删除这张" className="text-gray-500 hover:text-gray-300 text-lg leading-none px-1">×</button>
+            </div>
+            {openRatio === i && (
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {DESIGN_RATIOS.map((rk) => (
+                  <button key={rk} onClick={() => { setItem(i, { ratio: rk }); setOpenRatio(null) }} className={`px-2 py-1 rounded text-xs ${rk === d.ratio ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>{rk}</button>
+                ))}
+              </div>
+            )}
+            <textarea value={d.prompt} onChange={(e) => setItem(i, { prompt: e.target.value })} rows={2} className="field w-full py-1.5 px-2 text-[13px] resize-y leading-relaxed" />
+            <div className="text-right mt-1">
+              <button onClick={() => setConfirmed((p) => p.map((c, k) => (k === i ? !c : c)))} className={`px-2.5 py-1 rounded text-xs ${confirmed[i] ? 'bg-emerald-400/20 text-emerald-300' : 'bg-white/5 hover:bg-white/10'}`}>{confirmed[i] ? '✓ 已确认' : '确认这条'}</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="border border-dashed border-edge rounded-lg p-2.5 mb-2">
+        <div className="text-xs text-gray-400 mb-1.5">您希望将出图数量改为几张？可自行填写，并补充需要新增/删减的画面内容：</div>
+        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+          <input value={count} onChange={(e) => setCount(e.target.value.replace(/\D/g, ''))} className="field w-14 py-1 px-2 text-center text-sm" /> <span className="text-xs text-gray-400">张</span>
+          <button disabled={generating || replanBusy} onClick={manualCount} className="btn-soft py-1 px-2.5 text-xs">手动改为此数</button>
+          <button disabled={generating || replanBusy} onClick={aiReplan} className="btn-soft py-1 px-2.5 text-xs">{replanBusy ? 'AI 调整中…' : '🤖 让 AI 补足/重排'}</button>
+        </div>
+        <textarea value={adjust} onChange={(e) => setAdjust(e.target.value)} rows={2} placeholder="例：再加 3 张产品细节图、删掉海报、整体偏冷色调" className="field w-full py-1.5 px-2 text-xs resize-y" />
+      </div>
+      <div className="text-amber-300 text-[13px] mb-2">预计消耗约 {per * items.length} 点（每张约 {per} 点，按成功产出的张数实际扣点）</div>
+      <button className="btn-primary px-3.5 py-2 text-sm w-full" disabled={generating || replanBusy || items.length === 0} onClick={() => onGenerate(items)}>✅ 确认生成这 {items.length} 张</button>
+    </div>
   )
 }

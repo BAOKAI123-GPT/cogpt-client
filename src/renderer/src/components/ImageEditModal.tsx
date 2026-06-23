@@ -177,51 +177,51 @@ export function ImageEditModal({
     if (!editModel || !prompt.trim() || strokes.length === 0) return
     const mask = buildMaskDataUrl(nat.w, nat.h, strokes)
     const reqId = crypto.randomUUID()
-    // 局部重绘按原图尺寸出图，不放大；故不传 hdEdge，避免触发高清加点。
-    const reqBody = {
-      prompt: prompt.trim(),
-      size: `${nat.w}x${nat.h}`,
-      model: editModel,
-      initImages: [working],
-      mask,
-      reqId
-    }
-    // 失败自动重试，最多 3 次；额度不足不重试
-    const MAX = 3
+    // 局部重绘改走异步保活(提交→轮询，穿透 Cloudflare ~100s)，修复旧版同步 62/92s 被掐断的频繁失败；
+    // noFallback：失败如实失败、不静默换兜底模型补近似图(局部重绘必须像素对齐)。按原图尺寸出图，不传 hdEdge。
+    const reqBody = { prompt: prompt.trim(), size: `${nat.w}x${nat.h}`, model: editModel, initImages: [working], mask, reqId, async: true, noFallback: true }
     type GenRes = Awaited<ReturnType<typeof api.generate>>
-    let res: GenRes | null = null
-    let lastErr = '重绘失败'
-    for (let attempt = 1; attempt <= MAX; attempt++) {
-      setBusy(attempt === 1 ? '正在重绘选中区域…' : `重绘失败，正在自动重试 (${attempt}/${MAX})…`)
-      try {
-        res = await api.generate(reqBody)
-      } catch {
-        res = { ok: false, status: 0, data: { error: '网络异常，无法连接服务器' } } as GenRes
-      }
-      if (res.status === 402 || res.data?.needRecharge) {
-        setBusy(null)
-        alert('点数已用完，请到会员中心充值后再试。')
-        return
-      }
-      if (res.status === 400) {
-        setBusy(null)
-        alert(res.data?.error ?? '请求有误，请修改后重试')
-        return
-      }
-      if (res.ok && res.data.images && res.data.images[0]) break
-      lastErr = res.data?.error ?? '重绘失败'
+    let img = ''
+    let lastErr = '重绘失败，请重试'
+    setBusy('正在重绘选中区域…（通常 1–3 分钟）')
+    let sub: GenRes
+    try {
+      sub = await api.generate(reqBody)
+    } catch {
+      sub = { ok: false, status: 0, data: { error: '网络异常，无法连接服务器' } } as GenRes
     }
+    if (sub.status === 402 || sub.data?.needRecharge) { setBusy(null); alert('点数已用完，请到会员中心充值后再试。'); return }
+    if (sub.status === 400) { setBusy(null); alert(sub.data?.error ?? '请求有误，请修改后重试'); return }
+    if (sub.status === 200 && sub.data?.images?.[0]) img = sub.data.images[0]
+    else if (sub.status === 202 || (sub.data as { accepted?: boolean })?.accepted) {
+      const t0 = Date.now()
+      while (Date.now() - t0 < 315_000) {
+        await new Promise((r) => setTimeout(r, 3000))
+        setBusy(`正在重绘选中区域…（已 ${Math.round((Date.now() - t0) / 1000)}s，通常 1–3 分钟）`)
+        let st: Awaited<ReturnType<typeof api.generateStatus>>
+        try { st = await api.generateStatus(reqId) } catch { continue }
+        if (st.data?.state === 'done') {
+          const d = st.data.result || {}
+          if (st.data.status === 402 || d.needRecharge) { setBusy(null); alert('点数已用完，请到会员中心充值后再试。'); return }
+          if (d.images?.length) img = d.images[0]
+          else lastErr = d.error || lastErr
+          break
+        }
+        if (st.data?.state === 'missing') { lastErr = '重绘任务已丢失，请重试'; break }
+      }
+      if (!img && lastErr === '重绘失败，请重试') lastErr = '重绘超时了，请重试或缩小涂抹区域'
+    } else lastErr = sub.data?.error ?? lastErr
     setBusy(null)
-    if (res && res.ok && res.data.images && res.data.images[0]) {
-      setWorking(res.data.images[0])
+    if (img) {
+      setWorking(img)
       setStrokes([])
       setMode('view')
       setPrompt('')
       setScale(1)
-      addAssistantImage(res.data.images[0]) // 重绘结果同步进聊天框保存
+      addAssistantImage(img) // 重绘结果同步进聊天框保存
       refreshMe()
     } else {
-      alert(`${lastErr}（已自动重试 ${MAX} 次仍失败）`)
+      alert(lastErr)
     }
   }
 
