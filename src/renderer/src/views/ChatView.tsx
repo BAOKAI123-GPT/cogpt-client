@@ -98,6 +98,7 @@ export function ChatView(): JSX.Element {
   const curMeta = modelMeta[selectedModel] || { mode: 'quality', credits: 1, ref: true }
   const isStd = curMeta.mode === 'standard'
   const refAllowed = !!curMeta.ref
+  const canRefAny = models.some((m) => modelMeta[m]?.ref) // 是否存在支持参考图的模型（对话模式据此显示参考图入口）
   // 高质量档下的可选模型（GPT / Nano Banana 等）
   const qModels = models.filter((m) => modelMeta[m]?.mode !== 'standard')
 
@@ -152,10 +153,10 @@ export function ChatView(): JSX.Element {
     if (selectedModel && !ratioSupported(selectedModel, ratio)) setRatio(DEFAULT_RATIO)
   }, [selectedModel, ratio])
 
-  // 标准档（不支持参考图的模型）下，清掉已选的参考图，避免发出会被拒绝的请求
+  // 生图模式下，标准档（不支持参考图的模型）清掉参考图；对话模式保留（会自动用支持参考图的模型）
   useEffect(() => {
-    if (!refAllowed && refs.length) setRefs([])
-  }, [refAllowed, refs.length])
+    if (!chatMode && !refAllowed && refs.length) setRefs([])
+  }, [refAllowed, refs.length, chatMode])
 
   // 消费从应用任意位置拖入的图片（App 根级 drop 收集）：标准档先切到高质量档，再加入参考图
   useEffect(() => {
@@ -182,7 +183,7 @@ export function ChatView(): JSX.Element {
     // 必须有文字描述（即使带了参考图，gpt-image 也要求描述想要的画面，否则会报错）
     if (!p || generating) return
     // 对话模式：走 GPT 沟通（按点数计费，由服务端权威扣点）
-    if (chatMode) { setText(''); await chatSend(p); return }
+    if (chatMode) { setText(''); const r = refs; setRefs([]); await chatSend(p, r); return }
     const initImages = [
       ...(continueEdit && lastAssistantImage ? [lastAssistantImage] : []),
       ...refs
@@ -456,7 +457,7 @@ export function ChatView(): JSX.Element {
                 <ImageIcon size={13} /> 生图
               </button>
             </div>
-            {!chatMode && refAllowed && (
+            {((!chatMode && refAllowed) || (chatMode && canRefAny)) && (
               <button className="btn-soft py-1.5 px-2.5 text-xs" onClick={pickRefs}>
                 <ImagePlus size={14} /> 参考图{refs.length ? `(${refs.length})` : ''}
               </button>

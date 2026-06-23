@@ -123,7 +123,7 @@ interface AppStore {
 
   generate: (
     prompt: string,
-    opts?: { initImage?: string; initImages?: string[]; mask?: string; ratioKey?: string; qualityKey?: string }
+    opts?: { initImage?: string; initImages?: string[]; mask?: string; ratioKey?: string; qualityKey?: string; modelOverride?: string }
   ) => Promise<void>
   clearChat: () => void
   setNeedRecharge: (v: boolean) => void
@@ -132,7 +132,7 @@ interface AppStore {
   // 对话模式（GPT 沟通创意，按点数计费，由服务端权威扣点）
   chatMode: boolean
   setChatMode: (v: boolean) => void
-  chatSend: (text: string) => Promise<void>
+  chatSend: (text: string, refs?: string[]) => Promise<void>
   addAssistantImage: (dataUrl: string) => void // 局部重绘结果同步进聊天
 
   // 从应用任意位置拖入的图片（App 根级 drop 收集），待 ChatView 消费为参考图
@@ -332,7 +332,8 @@ export const useApp = create<AppStore>((set, get) => ({
 
   async generate(prompt, opts) {
     const trimmed = prompt.trim()
-    const model = get().selectedModel
+    // 对话带参考图时可强制用支持参考图的模型（modelOverride）；否则用所选模型
+    const model = opts?.modelOverride || get().selectedModel
     if (!model) {
       set({ messages: [...get().messages, { role: 'assistant', content: '⚠️ 暂无可用模型，请稍后重试' }] })
       return
@@ -495,10 +496,10 @@ export const useApp = create<AppStore>((set, get) => ({
   addPendingRefs: (urls) => { if (urls.length) set({ pendingRefs: [...get().pendingRefs, ...urls].slice(-8), view: 'chat', chatMode: false }) },
   clearPendingRefs: () => set({ pendingRefs: [] }),
 
-  async chatSend(input) {
+  async chatSend(input, refs) {
     const p = input.trim()
     if (!p || get().generating) return
-    // 回复"生成"等 → 用沟通好的提示词直接出图
+    // 回复"生成"等 → 用沟通好的提示词直接出图（带参考图则自动用支持参考图的模型）
     if (/^(生成|出图|生成图片|开始生成|画吧|可以了|可以生成)$/.test(p)) {
       const msgs = get().messages
       let gp = ''
@@ -507,7 +508,11 @@ export const useApp = create<AppStore>((set, get) => ({
         if (m.role === 'assistant' && m.content) { const mm = /\[\[生图提示词\]\]\s*(.+)/.exec(m.content); if (mm) gp = mm[1].trim() }
       }
       if (!gp) for (let i = msgs.length - 1; i >= 0 && !gp; i--) { if (msgs[i].role === 'user' && msgs[i].content) gp = msgs[i].content.trim() }
-      if (gp) { await get().generate(gp); return }
+      if (gp) {
+        const refModel = refs?.length ? get().models.find((m) => get().modelMeta[m]?.ref) : undefined
+        await get().generate(gp, refs?.length ? { initImages: refs, modelOverride: refModel } : undefined)
+        return
+      }
     }
     const msgs = get().messages
     const history = [
