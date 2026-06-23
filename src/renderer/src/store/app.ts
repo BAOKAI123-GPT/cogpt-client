@@ -8,7 +8,7 @@ const DEFAULT_META: ModelMetaItem = { mode: 'quality', credits: 1, ref: true }
 
 // 单张异步生成（提交→轮询），供设计工坊逐张生成复用。reqBody.reqId 必填。
 async function genOneJob(
-  reqBody: { prompt: string; model: string; size?: string; reqId: string },
+  reqBody: { prompt: string; model: string; size?: string; reqId: string; initImages?: string[] },
   ac: AbortController
 ): Promise<{ img?: string; quota?: Quota; err?: string; needRecharge?: boolean }> {
   let sub: Awaited<ReturnType<typeof api.generate>>
@@ -174,7 +174,7 @@ interface AppStore {
   // 设计工坊（对话拆解项目 → 预览确认 → 逐张异步生成推送）
   designMode: boolean
   setDesignMode: (v: boolean) => void
-  runDesign: (brief: string, preview: boolean) => Promise<void>
+  runDesign: (brief: string, preview: boolean, refs?: string[]) => Promise<void>
   genDesign: (items: { title: string; prompt: string; ratio: string }[]) => Promise<void>
   addAssistantImage: (dataUrl: string) => void // 局部重绘结果同步进聊天
 
@@ -189,6 +189,7 @@ interface AppStore {
 
 let genAC: AbortController | null = null // 当前生图请求的中止控制器
 let genReqId: string | null = null // 当前生图的 reqId（用于通知服务端中止）
+let designRefs: string[] = [] // 设计工坊本次上传的参考图（整套设计沿用；预览确认/续生成共用）
 
 export const useApp = create<AppStore>((set, get) => ({
   ready: false,
@@ -530,13 +531,15 @@ export const useApp = create<AppStore>((set, get) => ({
   setChatMode: (chatMode) => set({ chatMode, designMode: false }),
   setDesignMode: (designMode) => set({ designMode, chatMode: false }),
 
-  async runDesign(brief, preview) {
+  async runDesign(brief, preview, refs) {
     const p = brief.trim()
-    if (!p || get().generating) return
-    set({ messages: [...get().messages, { role: 'user', content: p }], generating: true, genStatus: '正在拆解设计需求…' })
+    const curRefs = refs || []
+    if ((!p && curRefs.length === 0) || get().generating) return
+    designRefs = curRefs // 整套设计沿用这批参考图
+    set({ messages: [...get().messages, { role: 'user', content: p || '（参考图设计）', images: curRefs.length ? curRefs : undefined }], generating: true, genStatus: '正在拆解设计需求…' })
     let r: Awaited<ReturnType<typeof api.designPlan>>
     try {
-      r = await api.designPlan(p)
+      r = await api.designPlan(p, curRefs.length)
     } catch {
       r = { ok: false, status: 0, data: { error: '网络异常，无法连接服务器' } }
     }
@@ -558,7 +561,10 @@ export const useApp = create<AppStore>((set, get) => ({
   async genDesign(items) {
     if (get().generating) return
     const { models, modelMeta, selectedModel } = get()
-    const useModel = models.find((m) => modelMeta[m]?.mode !== 'standard') || selectedModel || models[0] || 'gpt-image-2'
+    // 有参考图：用支持参考图的模型，让整套图基于上传的 logo/产品图等保持一致
+    const useModel = designRefs.length
+      ? (models.find((m) => modelMeta[m]?.ref) || models.find((m) => modelMeta[m]?.mode !== 'standard') || selectedModel)
+      : (models.find((m) => modelMeta[m]?.mode !== 'standard') || selectedModel || models[0] || 'gpt-image-2')
     const ac = new AbortController()
     genAC = ac
     set({ generating: true, canAbort: true, genStatus: '正在生成…' })
@@ -569,7 +575,7 @@ export const useApp = create<AppStore>((set, get) => ({
       set({ genStatus: `正在生成第 ${i + 1}/${items.length} 张：${items[i].title}…（可中止）` })
       const reqId = crypto.randomUUID()
       genReqId = reqId
-      const r = await genOneJob({ prompt: items[i].prompt, model: useModel, size: modelSizeFor(items[i].ratio), reqId }, ac)
+      const r = await genOneJob({ prompt: items[i].prompt, model: useModel, size: modelSizeFor(items[i].ratio), reqId, initImages: designRefs.length ? designRefs : undefined }, ac)
       if (ac.signal.aborted) break
       if (r.needRecharge) {
         paused = true

@@ -72,9 +72,10 @@ export const api = {
     req('/api/generate/status', { method: 'POST', body: JSON.stringify({ reqId }), signal }),
   // 设计工坊：把项目需求拆解成多张图的清单（gpt-5.1 回退 gpt-4o，后端处理）
   designPlan: (
-    brief: string
+    brief: string,
+    refCount?: number
   ): Promise<{ ok: boolean; status: number; data: { ok?: boolean; items?: { title: string; prompt: string; ratio: string }[]; quota?: Quota; error?: string; needRecharge?: boolean } }> =>
-    req('/api/design/plan', { method: 'POST', body: JSON.stringify({ brief }) }),
+    req('/api/design/plan', { method: 'POST', body: JSON.stringify({ brief, refCount: refCount || 0 }) }),
   models: (): Promise<{ ok: boolean; data: { models: string[]; meta?: ModelMeta; pricing?: Pricing } }> =>
     req('/api/models'),
   tiers: (): Promise<{

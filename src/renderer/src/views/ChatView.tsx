@@ -155,10 +155,10 @@ export function ChatView(): JSX.Element {
     if (selectedModel && !ratioSupported(selectedModel, ratio)) setRatio(DEFAULT_RATIO)
   }, [selectedModel, ratio])
 
-  // 生图模式下，标准档（不支持参考图的模型）清掉参考图；对话模式保留（会自动用支持参考图的模型）
+  // 生图模式下，标准档（不支持参考图的模型）清掉参考图；对话/设计模式保留（会自动用支持参考图的模型）
   useEffect(() => {
-    if (!chatMode && !refAllowed && refs.length) setRefs([])
-  }, [refAllowed, refs.length, chatMode])
+    if (!chatMode && !designMode && !refAllowed && refs.length) setRefs([])
+  }, [refAllowed, refs.length, chatMode, designMode])
 
   // 消费从应用任意位置拖入的图片（App 根级 drop 收集）：标准档先切到高质量档，再加入参考图
   useEffect(() => {
@@ -185,7 +185,7 @@ export function ChatView(): JSX.Element {
     // 必须有文字描述（即使带了参考图，gpt-image 也要求描述想要的画面，否则会报错）
     if (!p || generating) return
     // 对话模式：走 GPT 沟通（按点数计费，由服务端权威扣点）
-    if (designMode) { setText(''); await runDesign(p, designPreview); return }
+    if (designMode) { setText(''); const r = refs; setRefs([]); await runDesign(p, designPreview, r); return }
     if (chatMode) { setText(''); const r = refs; setRefs([]); await chatSend(p, r); return }
     const initImages = [
       ...(continueEdit && lastAssistantImage ? [lastAssistantImage] : []),
@@ -425,7 +425,7 @@ export function ChatView(): JSX.Element {
                 <ImageIcon size={13} /> 设计工坊
               </button>
             </div>
-            {!designMode && ((!chatMode && refAllowed) || (chatMode && canRefAny)) && (
+            {((!chatMode && !designMode && refAllowed) || ((chatMode || designMode) && canRefAny)) && (
               <button className="btn-soft py-1.5 px-2.5 text-xs" onClick={pickRefs}>
                 <ImagePlus size={14} /> 参考图{refs.length ? `(${refs.length})` : ''}
               </button>
@@ -480,7 +480,7 @@ export function ChatView(): JSX.Element {
             <button
               className="btn-primary h-[52px] px-4"
               onClick={() => send()}
-              disabled={generating || !text.trim()}
+              disabled={generating || (!text.trim() && !((designMode || !chatMode) && refs.length > 0))}
               title={!text.trim() ? '请输入文字描述' : '生成'}
             >
               {generating ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
