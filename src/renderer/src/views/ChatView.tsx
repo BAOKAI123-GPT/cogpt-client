@@ -486,11 +486,13 @@ export function ChatView(): JSX.Element {
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                // 回车发送，Shift+回车换行；输入法(拼音)选词按回车不误发
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault()
                   send()
                 }
               }}
+              enterKeyHint="send"
             />
             <button
               className="btn-primary h-[52px] px-4"
