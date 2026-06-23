@@ -11,7 +11,7 @@ export function SettingsView(): JSX.Element {
   const q = account?.quota
   const [copied, setCopied] = useState(false)
   const code = q?.inviteCode || ''
-  const promo = `最近在用一个 AI 生图工具，挺惊艳的——用的是 GPT-image2，出图质量是真高。价格也不贵，现在有个 9.9 的套餐挺超值。你注册的时候填我的邀请码 ${code}，咱俩各得 10 次（100 点）免费额度；你之后充值，我还能再得你充值额度的 10%。国内直接打开就能用，不用翻墙：https://cogpt.art/app`
+  const promo = `最近在用一个 AI 生图工具，挺惊艳的——用的是 GPT-image2，出图质量是真高。价格也不贵，现在有个 9.9 的套餐挺超值。你注册的时候填我的邀请码 ${code}，立得 100 额度（约 10 次免费生图）；之后你充值，我还能再得你充值额度的 10%。国内直接打开就能用，不用翻墙：https://cogpt.art/app`
   async function copyPromo(): Promise<void> {
     try {
       await navigator.clipboard.writeText(promo)
@@ -48,11 +48,11 @@ export function SettingsView(): JSX.Element {
         {/* 邀请好友 */}
         <section className="card p-5">
           <h2 className="font-medium mb-1 flex items-center gap-2">
-            <Gift size={16} className="text-brand" /> 邀请好友 · 双方各得免费点数
+            <Gift size={16} className="text-brand" /> 邀请好友 · 分销返利
           </h2>
           <p className="text-sm text-gray-400 mb-3">
-            朋友注册时填你的邀请码：<b className="text-gray-200">双方各得 10 次（100 点）免费额度</b>；
-            <b className="text-gray-200">TA 充值后，你再得其充值额度的 10%</b>。已成功邀请{' '}
+            好友用你的邀请码注册：<b className="text-gray-200">你 +300 额度，TA +100 额度</b>；之后{' '}
+            <b className="text-gray-200">TA 每次充值，你再得其充值额度的 10%</b>（长期返利，自动到账）。已成功邀请{' '}
             <b className="text-brand">{q?.inviteCount ?? 0}</b> 人。
           </p>
           <div className="font-mono text-2xl font-bold tracking-widest text-center py-3 rounded-xl bg-white/5 border border-white/10">
