@@ -6,6 +6,43 @@ import { modelSizeFor, qualityLongEdge, ratioSupported, DEFAULT_RATIO } from '..
 export type Tier = 'standard' | 'quality'
 const DEFAULT_META: ModelMetaItem = { mode: 'quality', credits: 1, ref: true }
 
+// 单张异步生成（提交→轮询），供设计工坊逐张生成复用。reqBody.reqId 必填。
+async function genOneJob(
+  reqBody: { prompt: string; model: string; size?: string; reqId: string },
+  ac: AbortController
+): Promise<{ img?: string; quota?: Quota; err?: string; needRecharge?: boolean }> {
+  let sub: Awaited<ReturnType<typeof api.generate>>
+  try {
+    sub = await api.generate({ ...reqBody, async: true }, ac.signal)
+  } catch {
+    return { err: '网络异常' }
+  }
+  if (ac.signal.aborted) return { err: 'aborted' }
+  if (sub.status === 402 || sub.data?.needRecharge) return { err: '点数不足', needRecharge: true }
+  if (sub.status === 429) return { err: sub.data?.error || '繁忙，请稍后' }
+  if (sub.status === 200 && sub.data?.images?.length) return { img: sub.data.images[0], quota: sub.data.quota }
+  if (!(sub.status === 202 || (sub.data as { accepted?: boolean })?.accepted)) return { err: sub.data?.error || '提交失败' }
+  const t0 = Date.now()
+  while (!ac.signal.aborted && Date.now() - t0 < 315_000) {
+    await new Promise((r) => setTimeout(r, 3000))
+    if (ac.signal.aborted) return { err: 'aborted' }
+    let st: Awaited<ReturnType<typeof api.generateStatus>>
+    try {
+      st = await api.generateStatus(reqBody.reqId, ac.signal)
+    } catch {
+      continue
+    }
+    if (ac.signal.aborted) return { err: 'aborted' }
+    if (st.data?.state === 'done') {
+      const d = st.data.result || {}
+      if (st.data.status === 402 || d.needRecharge) return { err: '点数不足', needRecharge: true }
+      return d.images?.length ? { img: d.images[0], quota: d.quota } : { err: d.error || '生成失败' }
+    }
+    if (st.data?.state === 'missing') return { err: '任务丢失' }
+  }
+  return { err: 'aborted' }
+}
+
 // 按档位筛选模型：standard 档=mode 为 standard 的模型；quality 档=其余（GPT/Nano Banana 等）
 function modelsOfTier(models: string[], meta: ModelMeta, t: Tier): string[] {
   return t === 'standard'
@@ -133,6 +170,12 @@ interface AppStore {
   chatMode: boolean
   setChatMode: (v: boolean) => void
   chatSend: (text: string, refs?: string[]) => Promise<void>
+
+  // 设计工坊（对话拆解项目 → 预览确认 → 逐张异步生成推送）
+  designMode: boolean
+  setDesignMode: (v: boolean) => void
+  runDesign: (brief: string, preview: boolean) => Promise<void>
+  genDesign: (items: { title: string; prompt: string; ratio: string }[]) => Promise<void>
   addAssistantImage: (dataUrl: string) => void // 局部重绘结果同步进聊天
 
   // 从应用任意位置拖入的图片（App 根级 drop 收集），待 ChatView 消费为参考图
@@ -164,6 +207,7 @@ export const useApp = create<AppStore>((set, get) => ({
   editorImage: undefined,
   update: null,
   chatMode: false,
+  designMode: false,
   canAbort: false,
   pendingRefs: [],
   convId: uid(),
@@ -483,7 +527,77 @@ export const useApp = create<AppStore>((set, get) => ({
   setNeedRecharge: (needRecharge) => set({ needRecharge }),
   sendToEditor: (dataUrl) => set({ editorImage: dataUrl, view: 'editor' }),
 
-  setChatMode: (chatMode) => set({ chatMode }),
+  setChatMode: (chatMode) => set({ chatMode, designMode: false }),
+  setDesignMode: (designMode) => set({ designMode, chatMode: false }),
+
+  async runDesign(brief, preview) {
+    const p = brief.trim()
+    if (!p || get().generating) return
+    set({ messages: [...get().messages, { role: 'user', content: p }], generating: true, genStatus: '正在拆解设计需求…' })
+    let r: Awaited<ReturnType<typeof api.designPlan>>
+    try {
+      r = await api.designPlan(p)
+    } catch {
+      r = { ok: false, status: 0, data: { error: '网络异常，无法连接服务器' } }
+    }
+    set({ generating: false, genStatus: '' })
+    if (r.status === 402 || r.data?.needRecharge) {
+      set({ messages: [...get().messages, { role: 'assistant', content: '⚠️ 点数已用完，请开通/升级或邀请好友得免费点数。' }], needRecharge: true })
+      return
+    }
+    if (!r.ok || !r.data?.items?.length) {
+      set({ messages: [...get().messages, { role: 'assistant', content: `⚠️ ${r.data?.error || '没能拆解需求，请把项目描述得更具体些'}` }] })
+      return
+    }
+    await get().refreshMe()
+    const items = r.data.items
+    if (preview) set({ messages: [...get().messages, { role: 'assistant', content: '', design: items }] })
+    else await get().genDesign(items)
+  },
+
+  async genDesign(items) {
+    if (get().generating) return
+    const { models, modelMeta, selectedModel } = get()
+    const useModel = models.find((m) => modelMeta[m]?.mode !== 'standard') || selectedModel || models[0] || 'gpt-image-2'
+    const ac = new AbortController()
+    genAC = ac
+    set({ generating: true, canAbort: true, genStatus: '正在生成…' })
+    let doneN = 0
+    let paused = false
+    for (let i = 0; i < items.length; i++) {
+      if (ac.signal.aborted) break
+      set({ genStatus: `正在生成第 ${i + 1}/${items.length} 张：${items[i].title}…（可中止）` })
+      const reqId = crypto.randomUUID()
+      genReqId = reqId
+      const r = await genOneJob({ prompt: items[i].prompt, model: useModel, size: modelSizeFor(items[i].ratio), reqId }, ac)
+      if (ac.signal.aborted) break
+      if (r.needRecharge) {
+        paused = true
+        const remaining = items.slice(i)
+        set({
+          messages: [
+            ...get().messages,
+            { role: 'assistant', content: `⚠️ 点数不足，本套设计已暂停（还剩 ${remaining.length} 张未生成）。请到「会员」充值/升级或邀请好友，然后点下方按钮继续。` },
+            { role: 'assistant', content: '', design: remaining, resume: true }
+          ],
+          needRecharge: true
+        })
+        break
+      }
+      if (r.img) {
+        set({ messages: [...get().messages, { role: 'assistant', content: '', images: [r.img], note: `【${items[i].title}】${items[i].ratio}` }] })
+        doneN++
+      } else {
+        set({ messages: [...get().messages, { role: 'assistant', content: `⚠️ 第 ${i + 1} 张「${items[i].title}」生成失败：${r.err}` }] })
+      }
+    }
+    genAC = null
+    set({ generating: false, canAbort: false, genStatus: '' })
+    await get().refreshMe()
+    if (!paused) {
+      set({ messages: [...get().messages, { role: 'assistant', content: ac.signal.aborted ? `已中止（已完成 ${doneN}/${items.length} 张）` : `✅ 这套设计已生成完毕（共 ${doneN}/${items.length} 张）。` }] })
+    }
+  },
   abortGenerate: () => { if (genReqId) void api.cancelGenerate(genReqId); genAC?.abort() },
 
   // 局部重绘结果同步进聊天框，保存记录

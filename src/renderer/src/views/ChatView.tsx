@@ -76,6 +76,10 @@ export function ChatView(): JSX.Element {
   const chatMode = useApp((s) => s.chatMode)
   const setChatMode = useApp((s) => s.setChatMode)
   const chatSend = useApp((s) => s.chatSend)
+  const designMode = useApp((s) => s.designMode)
+  const setDesignMode = useApp((s) => s.setDesignMode)
+  const runDesign = useApp((s) => s.runDesign)
+  const genDesign = useApp((s) => s.genDesign)
   const canAbort = useApp((s) => s.canAbort)
   const abortGenerate = useApp((s) => s.abortGenerate)
   const pendingRefs = useApp((s) => s.pendingRefs)
@@ -87,6 +91,7 @@ export function ChatView(): JSX.Element {
   const [ratio, setRatio] = useState(DEFAULT_RATIO)
   const [quality, setQuality] = useState(DEFAULT_QUALITY)
   const [dragOver, setDragOver] = useState(false)
+  const [designPreview, setDesignPreview] = useState<boolean>(() => { try { return localStorage.getItem('cogpt_design_preview') !== '0' } catch { return true } })
   // 即梦式：单行控件 + 点开「设置」弹层放详细项（档位/模型/比例/画质）
   const [panel, setPanel] = useState<'set' | null>(null)
   const [editImage, setEditImage] = useState<string | null>(null)
@@ -183,6 +188,7 @@ export function ChatView(): JSX.Element {
     // 必须有文字描述（即使带了参考图，gpt-image 也要求描述想要的画面，否则会报错）
     if (!p || generating) return
     // 对话模式：走 GPT 沟通（按点数计费，由服务端权威扣点）
+    if (designMode) { setText(''); await runDesign(p, designPreview); return }
     if (chatMode) { setText(''); const r = refs; setRefs([]); await chatSend(p, r); return }
     const initImages = [
       ...(continueEdit && lastAssistantImage ? [lastAssistantImage] : []),
@@ -284,15 +290,40 @@ export function ChatView(): JSX.Element {
             </div>
           )}
 
-          {messages.map((m, i) => (
-            <Bubble
-              key={i}
-              msg={m}
-              onEdit={setEditImage}
-              onContextText={onContextText}
-              onContextImage={onContextImage}
-            />
-          ))}
+          {messages.map((m, i) =>
+            m.design ? (
+              (() => {
+                const per = modelMeta[qModels[0]]?.credits || 20
+                const est = per * m.design.length
+                return (
+                  <div key={i} className="bg-panel/60 border border-edge rounded-2xl rounded-tl-sm px-4 py-3 text-sm max-w-[92%] mb-3 leading-relaxed">
+                    <b>{m.resume ? `点数不足已暂停，充值后可继续生成剩余 ${m.design.length} 张：` : `已把项目拆解为 ${m.design.length} 张，确认后逐张生成：`}</b>
+                    <ol className="list-decimal pl-5 my-2 space-y-1.5">
+                      {m.design.map((d, k) => (
+                        <li key={k}>
+                          <b>{d.title}</b> <span className="text-gray-400">· {d.ratio}</span>
+                          <br />
+                          <span className="text-gray-400 text-[13px]">{d.prompt}</span>
+                        </li>
+                      ))}
+                    </ol>
+                    <div className="text-amber-300 text-[13px] mb-2">预计消耗约 {est} 点（每张约 {per} 点，按成功产出的张数实际扣点）</div>
+                    <button className="btn-primary px-3.5 py-2 text-sm" disabled={generating} onClick={() => genDesign(m.design!)}>
+                      {m.resume ? `💳 我已充值，继续生成剩余 ${m.design.length} 张` : `✅ 确认生成这 ${m.design.length} 张`}
+                    </button>
+                  </div>
+                )
+              })()
+            ) : (
+              <Bubble
+                key={i}
+                msg={m}
+                onEdit={setEditImage}
+                onContextText={onContextText}
+                onContextImage={onContextImage}
+              />
+            )
+          )}
 
           {generating && <ProgressCard status={genStatus} onAbort={canAbort ? abortGenerate : undefined} />}
         </div>
@@ -319,7 +350,7 @@ export function ChatView(): JSX.Element {
           )}
 
           {/* 设置弹层（即梦式：把标准/高质量档 + 高质量模型 + 比例 + 画质收进一个紧凑面板，点「设置」从下方弹起） */}
-          {!chatMode && panel === 'set' && (
+          {!chatMode && !designMode && panel === 'set' && (
             <div className="card p-3 mb-2 space-y-3">
               {/* 档位：标准 / 高质量 */}
               <div className="flex items-center gap-2 flex-wrap">
@@ -445,30 +476,44 @@ export function ChatView(): JSX.Element {
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
               <button
+                className={`flex items-center gap-1 px-3 py-1.5 ${!chatMode && !designMode ? 'bg-brand text-white' : 'text-gray-400'}`}
+                onClick={() => { setChatMode(false); setPanel(null) }}
+              >
+                <ImageIcon size={13} /> 生图
+              </button>
+              <button
                 className={`flex items-center gap-1 px-3 py-1.5 ${chatMode ? 'bg-brand text-white' : 'text-gray-400'}`}
                 onClick={() => { setChatMode(true); setPanel(null) }}
               >
                 <MessageSquareQuote size={13} /> 对话
               </button>
               <button
-                className={`flex items-center gap-1 px-3 py-1.5 ${!chatMode ? 'bg-brand text-white' : 'text-gray-400'}`}
-                onClick={() => setChatMode(false)}
+                className={`flex items-center gap-1 px-3 py-1.5 ${designMode ? 'bg-brand text-white' : 'text-gray-400'}`}
+                onClick={() => { setDesignMode(true); setPanel(null) }}
               >
-                <ImageIcon size={13} /> 生图
+                <ImageIcon size={13} /> 设计工坊
               </button>
             </div>
-            {((!chatMode && refAllowed) || (chatMode && canRefAny)) && (
+            {!designMode && ((!chatMode && refAllowed) || (chatMode && canRefAny)) && (
               <button className="btn-soft py-1.5 px-2.5 text-xs" onClick={pickRefs}>
                 <ImagePlus size={14} /> 参考图{refs.length ? `(${refs.length})` : ''}
               </button>
             )}
-            {!chatMode && (
+            {!chatMode && !designMode && (
               <button
                 className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'set' ? '!bg-brand !text-white !border-brand' : ''}`}
                 onClick={() => setPanel(panel === 'set' ? null : 'set')}
                 title="档位 / 模型 / 比例 / 画质"
               >
                 <SlidersHorizontal size={14} /> {setSummary}
+              </button>
+            )}
+            {designMode && (
+              <button
+                className="btn-soft py-1.5 px-2.5 text-xs"
+                onClick={() => { const v = !designPreview; setDesignPreview(v); try { localStorage.setItem('cogpt_design_preview', v ? '1' : '0') } catch { /* ignore */ } }}
+              >
+                {designPreview ? '✓ 生成前预览提示词' : '直接生成(不预览)'}
               </button>
             )}
             {messages.length > 0 && (
@@ -484,7 +529,7 @@ export function ChatView(): JSX.Element {
           <div className="flex items-end gap-2">
             <textarea
               className="field resize-none h-[52px] py-3"
-              placeholder={chatMode ? '说说你想要的图，我帮你聊清楚（想好了回复「生成」即可出图）…' : '描述你想要的图片；也可拖入/粘贴图片作为参考图…'}
+              placeholder={designMode ? '描述你的设计项目，如：BV×草间弥生 联名海报一套（含主视觉/Logo/产品周边）…' : chatMode ? '说说你想要的图，我帮你聊清楚（想好了回复「生成」即可出图）…' : '描述你想要的图片；也可拖入/粘贴图片作为参考图…'}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onPaste={async (e) => {

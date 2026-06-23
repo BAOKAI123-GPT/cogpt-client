@@ -88,6 +88,10 @@ export interface ChatMessage {
   images?: string[]
   /** 醒目提示（如所选模型繁忙、已用兜底模型补出图时的说明），渲染在结果图上方 */
   note?: string
+  /** 设计工坊：拆解出的待生成图片清单（渲染成预览确认卡） */
+  design?: { title: string; prompt: string; ratio: string }[]
+  /** 设计工坊：该卡是「点数不足后续生成」卡（充值后继续生成剩余） */
+  resume?: boolean
 }
 
 export interface AppSettings {
