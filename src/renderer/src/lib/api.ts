@@ -52,6 +52,23 @@ export interface Quota {
   inviteCount?: number
 }
 
+// 代理/分销（现金佣金 + 申请结算）数据
+export interface AgentMe {
+  enabled: boolean
+  isAgent: boolean
+  commissionPct: number
+  payoutMinCents: number
+  terms: string
+  wechatQr: string
+  inviteCode: string
+  agentName?: string | null
+  payMethod?: string | null
+  payAccount?: string | null
+  stats?: { referredCount: number; rechargedCents: number; earnedCents: number; paidCents: number; processingCents: number; pendingCents: number }
+  commissions?: { id: string; createdAt: string; orderAmountCents: number; commissionCents: number }[]
+  payouts?: { id: string; createdAt: string; amountCents: number; status: string }[]
+}
+
 export const api = {
   sendCode: (phone: string) =>
     req('/api/auth/send-code', { method: 'POST', body: JSON.stringify({ phone }) }),
@@ -123,5 +140,15 @@ export const api = {
   appVersion: (): Promise<{
     ok: boolean
     data: { version?: string; url?: string; notes?: string; force?: boolean }
-  }> => req('/api/app-version')
+  }> => req('/api/app-version'),
+  // —— 代理/分销 ——
+  agentMe: (): Promise<{ ok: boolean; status: number; data: AgentMe }> => req('/api/agent/me'),
+  agentEnroll: (
+    name: string,
+    method: string,
+    account: string
+  ): Promise<{ ok: boolean; status: number; data: { ok?: boolean; inviteCode?: string; error?: string } }> =>
+    req('/api/agent/enroll', { method: 'POST', body: JSON.stringify({ name, method, account }) }),
+  agentRequestPayout: (): Promise<{ ok: boolean; status: number; data: { ok?: boolean; amountCents?: number; wechatQr?: string; error?: string } }> =>
+    req('/api/agent/payout', { method: 'POST' })
 }
