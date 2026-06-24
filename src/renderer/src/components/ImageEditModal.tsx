@@ -488,8 +488,8 @@ export function ImageEditModal({
 
           <div className="flex-1" />
           <div className="flex gap-2">
-            <button className="btn-soft flex-1" onClick={save}>
-              {saved ? '已保存 ✓' : (
+            <button className="btn-soft flex-1 inline-flex items-center justify-center gap-1" onClick={save}>
+              {saved ? (<><Check size={14} /> 已保存</>) : (
                 <>
                   <Download size={15} /> 保存
                 </>

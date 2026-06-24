@@ -382,7 +382,7 @@ export const useApp = create<AppStore>((set, get) => ({
     // 对话带参考图时可强制用支持参考图的模型（modelOverride）；否则用所选模型
     const model = opts?.modelOverride || get().selectedModel
     if (!model) {
-      set({ messages: [...get().messages, { role: 'assistant', content: '⚠️ 暂无可用模型，请稍后重试' }] })
+      set({ messages: [...get().messages, { role: 'assistant', content: '暂无可用模型，请稍后重试' }] })
       return
     }
     // 按 meta 收口：标准档（或模型不支持参考图）一律丢弃参考图，并把不支持的画幅回退到 1:1。
@@ -473,23 +473,23 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ canAbort: false })
     // 忙（上一张还在收尾，达并发上限）
     if (busyMsg) {
-      set({ messages: [...get().messages, { role: 'assistant', content: `⚠️ ${busyMsg}` }], generating: false, genStatus: '', canAbort: false })
+      set({ messages: [...get().messages, { role: 'assistant', content: `${busyMsg}` }], generating: false, genStatus: '', canAbort: false })
       return
     }
     // 额度不足
     if (res && (res.status === 402 || res.data?.needRecharge)) {
-      set({ messages: [...get().messages, { role: 'assistant', content: '⚠️ 额度已用完，请开通或升级会员后再试。' }], generating: false, genStatus: '', canAbort: false, needRecharge: true })
+      set({ messages: [...get().messages, { role: 'assistant', content: '额度已用完，请开通或升级会员后再试。' }], generating: false, genStatus: '', canAbort: false, needRecharge: true })
       return
     }
     // 校验/审核类错误
     if (res && res.status === 400) {
-      set({ messages: [...get().messages, { role: 'assistant', content: `⚠️ ${res.data?.error ?? '请求有误，请修改后重试'}` }], generating: false, genStatus: '', canAbort: false })
+      set({ messages: [...get().messages, { role: 'assistant', content: `${res.data?.error ?? '请求有误，请修改后重试'}` }], generating: false, genStatus: '', canAbort: false })
       return
     }
     const success = !!(res && res.ok && res.data.images && res.data.images.length)
     if (!success) {
       set({
-        messages: [...get().messages, { role: 'assistant', content: `⚠️ ${res?.data?.error || lastErr}` }],
+        messages: [...get().messages, { role: 'assistant', content: `${res?.data?.error || lastErr}` }],
         generating: false,
         genStatus: ''
       })
@@ -515,8 +515,8 @@ export const useApp = create<AppStore>((set, get) => ({
     // approx=true 表示是「按参考图描述生成的近似图」（参考图通道都失败的兜底，非精确改图）。
     const note = res!.data.fallback
       ? res!.data.approx
-        ? '⚡ 参考图通道繁忙，已根据图片描述生成「近似图」（非精确改图，仅供参考）'
-        : '⚡ 高质量模型当前繁忙，已用「极速」模型为你生成（风格可能略有不同）'
+        ? '参考图通道繁忙，已根据图片描述生成「近似图」（非精确改图，仅供参考）'
+        : '高质量模型当前繁忙，已用「极速」模型为你生成（风格可能略有不同）'
       : undefined
     const assistant: ChatMessage = { role: 'assistant', content: res!.data.text ?? '', images, note, src: { prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey } }
     const patch: Partial<AppStore> = { messages: [...get().messages, assistant], generating: false, genStatus: '' }
@@ -549,11 +549,11 @@ export const useApp = create<AppStore>((set, get) => ({
     }
     set({ generating: false, genStatus: '' })
     if (r.status === 402 || r.data?.needRecharge) {
-      set({ messages: [...get().messages, { role: 'assistant', content: '⚠️ 点数已用完，请开通/升级或邀请好友得免费点数。' }], needRecharge: true })
+      set({ messages: [...get().messages, { role: 'assistant', content: '点数已用完，请开通/升级或邀请好友得免费点数。' }], needRecharge: true })
       return
     }
     if (!r.ok || !r.data?.items?.length) {
-      set({ messages: [...get().messages, { role: 'assistant', content: `⚠️ ${r.data?.error || '没能拆解需求，请把项目描述得更具体些'}` }] })
+      set({ messages: [...get().messages, { role: 'assistant', content: `${r.data?.error || '没能拆解需求，请把项目描述得更具体些'}` }] })
       return
     }
     await get().refreshMe()
@@ -597,7 +597,7 @@ export const useApp = create<AppStore>((set, get) => ({
         set({
           messages: [
             ...get().messages,
-            { role: 'assistant', content: `⚠️ 点数不足，本套设计已暂停（还剩 ${remaining.length} 张未生成）。请到「会员」充值/升级或邀请好友，然后点下方按钮继续。` },
+            { role: 'assistant', content: `点数不足，本套设计已暂停（还剩 ${remaining.length} 张未生成）。请到「会员」充值/升级或邀请好友，然后点下方按钮继续。` },
             { role: 'assistant', content: '', design: remaining, resume: true }
           ],
           needRecharge: true
@@ -609,14 +609,14 @@ export const useApp = create<AppStore>((set, get) => ({
         set({ messages: [...get().messages, { role: 'assistant', content: '', images: [r.img], note: `【${it.title}】${it.ratio}`, src: { prompt: it.prompt, refs: designRefs.length ? designRefs : undefined, ratio: it.ratio } }] })
         doneN++
       } else {
-        set({ messages: [...get().messages, { role: 'assistant', content: `⚠️ 第 ${i + 1} 张「${items[i].title}」生成失败：${r.err}` }] })
+        set({ messages: [...get().messages, { role: 'assistant', content: `第 ${i + 1} 张「${items[i].title}」生成失败：${r.err}` }] })
       }
     }
     genAC = null
     set({ generating: false, canAbort: false, genStatus: '' })
     await get().refreshMe()
     if (!paused) {
-      set({ messages: [...get().messages, { role: 'assistant', content: ac.signal.aborted ? `已中止（已完成 ${doneN}/${items.length} 张）` : `✅ 这套设计已生成完毕（共 ${doneN}/${items.length} 张）。` }] })
+      set({ messages: [...get().messages, { role: 'assistant', content: ac.signal.aborted ? `已中止（已完成 ${doneN}/${items.length} 张）` : `这套设计已生成完毕（共 ${doneN}/${items.length} 张）。` }] })
     }
   },
   abortGenerate: () => { if (genReqId) void api.cancelGenerate(genReqId); genAC?.abort() },
@@ -662,7 +662,7 @@ export const useApp = create<AppStore>((set, get) => ({
       r = { ok: false, status: 0, data: { error: '网络异常' } }
     }
     if (r.status === 402 || r.data?.needRecharge) {
-      set({ messages: [...get().messages, { role: 'assistant', content: '⚠️ 点数已用完，请开通/升级或邀请好友得免费点数。' }], generating: false, genStatus: '', needRecharge: true })
+      set({ messages: [...get().messages, { role: 'assistant', content: '点数已用完，请开通/升级或邀请好友得免费点数。' }], generating: false, genStatus: '', needRecharge: true })
       return
     }
     if (r.ok && r.data?.reply) {
@@ -671,7 +671,7 @@ export const useApp = create<AppStore>((set, get) => ({
       set(patch)
       void get().persistConv()
     } else {
-      set({ messages: [...get().messages, { role: 'assistant', content: `⚠️ ${r.data?.error || '对话失败'}` }], generating: false, genStatus: '' })
+      set({ messages: [...get().messages, { role: 'assistant', content: `${r.data?.error || '对话失败'}` }], generating: false, genStatus: '' })
     }
   }
 }))

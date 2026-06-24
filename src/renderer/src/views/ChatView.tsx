@@ -10,7 +10,9 @@ import {
   X,
   SlidersHorizontal,
   MessageSquareQuote,
-  Image as ImageIcon
+  Image as ImageIcon,
+  CreditCard,
+  Check
 } from 'lucide-react'
 import { useApp } from '../store/app'
 import type { ChatMessage } from '@shared/types'
@@ -40,11 +42,11 @@ const SUGGESTIONS = [
 // 找不到再回退本地映射，最后回退裸 id。
 const MODEL_LABELS: Record<string, string> = {
   'gemini-2.5-flash-image': 'Nano Banana',
-  'gpt-image-1-mini': '快速',
-  'gpt-image-2': '高质量GPT',
-  'gpt-image-2-all': '高质量GPT',
-  'gpt-image-2-light': '标准',
-  'gpt-image-1': '标准',
+  'gpt-image-1-mini': 'GPT快速文生图',
+  'gpt-image-2': '高质量GPT image2',
+  'gpt-image-2-all': '高质量GPT image2',
+  'gpt-image-2-light': 'GPT快速文生图',
+  'gpt-image-1': 'GPT快速文生图',
   'gpt-image-1.5': '高清'
 }
 function modelLabel(m: string, meta?: ModelMeta): string {
@@ -309,7 +311,7 @@ export function ChatView(): JSX.Element {
                     ))}
                   </ol>
                   <div className="text-amber-300 text-[13px] mb-2">预计消耗约 {(modelMeta[qModels[0]]?.credits || 10) * m.design.length} 点（每张约 {modelMeta[qModels[0]]?.credits || 10} 点，按成功产出的张数实际扣点）</div>
-                  <button className="btn-primary px-3.5 py-2 text-sm" disabled={generating} onClick={() => genDesign(m.design!)}>💳 我已充值，继续生成剩余 {m.design.length} 张</button>
+                  <button className="btn-primary px-3.5 py-2 text-sm inline-flex items-center gap-1.5" disabled={generating} onClick={() => genDesign(m.design!)}><CreditCard size={14} /> 我已充值，继续生成剩余 {m.design.length} 张</button>
                 </div>
               ) : (
                 <DesignCardDesktop key={i} msg={m} generating={generating} per={modelMeta[qModels[0]]?.credits || 10} onGenerate={genDesign} onReplan={replanDesign} />
@@ -356,8 +358,8 @@ export function ChatView(): JSX.Element {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-gray-400 w-12 shrink-0">画质档</span>
                 <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
-                  <button className={`px-3 py-1.5 ${isStd ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setTier('standard')}>标准</button>
-                  <button className={`px-3 py-1.5 ${!isStd ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setTier('quality')}>高质量</button>
+                  <button className={`px-3 py-1.5 whitespace-nowrap ${isStd ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setTier('standard')}>GPT快速文生图</button>
+                  <button className={`px-3 py-1.5 whitespace-nowrap ${!isStd ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setTier('quality')}>高质量GPT image2</button>
                 </div>
                 <span className="text-[11px] text-gray-500">本次{hasExtra ? '约扣' : '扣'} <b className="text-gray-300">{estPoints}</b> 点{isStd ? '（通用 3 比例）' : '（可换模型 / 参考图 / 全比例）'}</span>
               </div>
@@ -448,7 +450,7 @@ export function ChatView(): JSX.Element {
             {!chatMode && !designMode && (
               <>
                 <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'model' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'model' ? null : 'model')}>
-                  <SlidersHorizontal size={14} /> {isStd ? '标准' : modelLabel(selectedModel, modelMeta)} ⌄
+                  <SlidersHorizontal size={14} /> {isStd ? 'GPT快速文生图' : modelLabel(selectedModel, modelMeta)} ⌄
                 </button>
                 <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'ratio' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'ratio' ? null : 'ratio')}>{ratio} ⌄</button>
                 <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'hd' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'hd' ? null : 'hd')}>{QUALITIES.find((q) => q.key === quality)?.label || '标准'} ⌄</button>
@@ -635,9 +637,9 @@ function ImageCard({
             e.stopPropagation()
             save()
           }}
-          className="btn-soft py-1.5 px-2.5 text-xs"
+          className="btn-soft py-1.5 px-2.5 text-xs inline-flex items-center gap-1"
         >
-          {saved ? '已保存 ✓' : (
+          {saved ? (<><Check size={13} /> 已保存</>) : (
             <>
               <Download size={14} /> 保存
             </>
@@ -707,7 +709,7 @@ function DesignCardDesktop({
             )}
             <textarea value={d.prompt} onChange={(e) => setItem(i, { prompt: e.target.value })} rows={2} className="field w-full py-1.5 px-2 text-[13px] resize-y leading-relaxed" />
             <div className="text-right mt-1">
-              <button onClick={() => setConfirmed((p) => p.map((c, k) => (k === i ? !c : c)))} className={`px-2.5 py-1 rounded text-xs ${confirmed[i] ? 'bg-emerald-400/20 text-emerald-300' : 'bg-white/5 hover:bg-white/10'}`}>{confirmed[i] ? '✓ 已确认' : '确认这条'}</button>
+              <button onClick={() => setConfirmed((p) => p.map((c, k) => (k === i ? !c : c)))} className={`px-2.5 py-1 rounded text-xs inline-flex items-center gap-1 ${confirmed[i] ? 'bg-emerald-400/20 text-emerald-300' : 'bg-white/5 hover:bg-white/10'}`}>{confirmed[i] ? (<><Check size={12} /> 已确认</>) : '确认这条'}</button>
             </div>
           </div>
         ))}
@@ -717,12 +719,12 @@ function DesignCardDesktop({
         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
           <input value={count} onChange={(e) => setCount(e.target.value.replace(/\D/g, ''))} className="field w-14 py-1 px-2 text-center text-sm" /> <span className="text-xs text-gray-400">张</span>
           <button disabled={generating || replanBusy} onClick={manualCount} className="btn-soft py-1 px-2.5 text-xs">手动改为此数</button>
-          <button disabled={generating || replanBusy} onClick={aiReplan} className="btn-soft py-1 px-2.5 text-xs">{replanBusy ? 'AI 调整中…' : '🤖 让 AI 补足/重排'}</button>
+          <button disabled={generating || replanBusy} onClick={aiReplan} className="btn-soft py-1 px-2.5 text-xs inline-flex items-center gap-1">{replanBusy ? 'AI 调整中…' : (<><Wand2 size={13} /> 让 AI 补足/重排</>)}</button>
         </div>
         <textarea value={adjust} onChange={(e) => setAdjust(e.target.value)} rows={2} placeholder="例：再加 3 张产品细节图、删掉海报、整体偏冷色调" className="field w-full py-1.5 px-2 text-xs resize-y" />
       </div>
       <div className="text-amber-300 text-[13px] mb-2">预计消耗约 {per * items.length} 点（每张约 {per} 点，按成功产出的张数实际扣点）</div>
-      <button className="btn-primary px-3.5 py-2 text-sm w-full" disabled={generating || replanBusy || items.length === 0} onClick={() => onGenerate(items)}>✅ 确认生成这 {items.length} 张</button>
+      <button className="btn-primary px-3.5 py-2 text-sm w-full inline-flex items-center justify-center gap-1.5" disabled={generating || replanBusy || items.length === 0} onClick={() => onGenerate(items)}><Check size={15} /> 确认生成这 {items.length} 张</button>
     </div>
   )
 }

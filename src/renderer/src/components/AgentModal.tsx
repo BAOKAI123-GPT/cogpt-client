@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { X, Coins, CheckCircle2 } from 'lucide-react'
 import { api, type AgentMe } from '../lib/api'
 
 // 「我要做代理/赚钱」全屏面板：未登记→招募+登记；已登记→佣金仪表盘 + 申请结算(待结归零) + 运营微信二维码。
@@ -62,7 +62,7 @@ export function AgentModal({ onClose }: { onClose: () => void }): JSX.Element {
           ) : !data.isAgent ? (
             <>
               <div className="card p-4">
-                <div className="font-bold text-base mb-2">💰 成为推广代理，长期赚钱</div>
+                <div className="font-bold text-base mb-2 flex items-center gap-1.5"><Coins size={18} className="text-amber-300" /> 成为推广代理，长期赚钱</div>
                 <div className="text-sm text-gray-400 leading-relaxed whitespace-pre-wrap">{data.terms}</div>
                 <div className="text-amber-300 text-sm mt-2.5">佣金比例：推广用户每次充值金额的 <b>{data.commissionPct}%</b>（现金，复充持续返）· 满 {yuan(data.payoutMinCents)} 可申请结算</div>
               </div>
@@ -99,8 +99,8 @@ export function AgentModal({ onClose }: { onClose: () => void }): JSX.Element {
                 </div>
                 {data.wechatQr && (
                   <div className="mt-3 text-center card p-3.5">
-                    <div className={`font-bold mb-1 ${reqDone || proc > 0 ? 'text-emerald-400' : ''}`}>{reqDone ? '✅ 结算申请已提交！' : '联系运营微信'}</div>
-                    <div className="text-gray-400 text-[13px] mb-2.5">{reqDone || proc > 0 ? '请扫码加运营微信，核对后会尽快微信转账给你 👇' : '结算 / 咨询请扫码加运营微信 👇'}</div>
+                    <div className={`font-bold mb-1 inline-flex items-center gap-1.5 ${reqDone || proc > 0 ? 'text-emerald-400' : ''}`}>{reqDone ? (<><CheckCircle2 size={16} /> 结算申请已提交！</>) : '联系运营微信'}</div>
+                    <div className="text-gray-400 text-[13px] mb-2.5">{reqDone || proc > 0 ? '请扫码加运营微信，核对后会尽快微信转账给你' : '结算 / 咨询请扫码加运营微信'}</div>
                     <img src={data.wechatQr} alt="运营微信二维码" className="w-48 max-w-[70%] mx-auto rounded-lg bg-white p-1.5" />
                   </div>
                 )}

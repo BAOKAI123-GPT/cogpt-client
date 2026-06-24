@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ImagePlus, Download, Loader2, Ruler, Sparkles, Maximize2, Shapes } from 'lucide-react'
+import { ImagePlus, Download, Loader2, Ruler, Sparkles, Maximize2, Shapes, Check } from 'lucide-react'
 import { useEditor } from '../store/editor'
 import { useApp } from '../store/app'
 
@@ -165,7 +165,7 @@ export function EditorView(): JSX.Element {
             </>
           ) : (
             <>
-              <div className="text-xs text-emerald-400 mb-2">✓ 矢量化完成</div>
+              <div className="text-xs text-emerald-400 mb-2 inline-flex items-center gap-1"><Check size={13} /> 矢量化完成</div>
               <button className="btn-primary w-full text-xs mb-2" onClick={exportSvg}>
                 <Download size={14} /> 导出矢量 SVG（印刷/AI 可用）
               </button>
