@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { LogOut, ShieldCheck, Gift, Wallet, ChevronRight } from 'lucide-react'
+import { LogOut, ShieldCheck, Gift, Wallet, ChevronRight, Crown } from 'lucide-react'
 import { useApp } from '../store/app'
 import type { AppSettings } from '@shared/types'
 import { AgentModal } from '../components/AgentModal'
+import { Membership } from '../components/Membership'
 
 export function SettingsView(): JSX.Element {
   const account = useApp((s) => s.account)
@@ -12,6 +13,7 @@ export function SettingsView(): JSX.Element {
   const q = account?.quota
   const [copied, setCopied] = useState(false)
   const [agentOpen, setAgentOpen] = useState(false)
+  const [memberOpen, setMemberOpen] = useState(false)
   const code = q?.inviteCode || ''
   const promo = `最近在用一个 AI 生图工具，挺惊艳的——用的是 GPT-image2，出图质量是真高。价格也不贵，现在有个 9.9 的套餐挺超值。你注册的时候填我的邀请码 ${code}，立得 100 额度（约 10 次免费生图）；之后你充值，我还能再得你充值额度的 10%。国内直接打开就能用，不用翻墙：https://cogpt.art/app`
   async function copyPromo(): Promise<void> {
@@ -46,6 +48,17 @@ export function SettingsView(): JSX.Element {
             <LogOut size={15} /> 退出登录
           </button>
         </section>
+
+        {/* 会员中心 / 充值 */}
+        <button onClick={() => setMemberOpen(true)} className="w-full text-left card p-4 flex items-center gap-3 hover:border-brand/60" style={{ background: 'linear-gradient(120deg, rgba(255,193,90,.22), rgba(176,108,255,.16))' }}>
+          <Crown size={26} className="text-amber-300 shrink-0" />
+          <span className="flex-1">
+            <b className="text-base">会员中心 / 充值</b>
+            <br />
+            <span className="text-sm text-gray-400">开通会员得更多点数 · 多对话历史 · 生图失败不扣点</span>
+          </span>
+          <ChevronRight size={20} className="text-gray-400" />
+        </button>
 
         {/* 我要做代理 / 赚钱 */}
         <button onClick={() => setAgentOpen(true)} className="w-full text-left card p-4 flex items-center gap-3 hover:border-brand/60" style={{ background: 'linear-gradient(120deg, rgba(139,123,255,.28), rgba(22,165,201,.18))' }}>
@@ -100,6 +113,7 @@ export function SettingsView(): JSX.Element {
         </section>
       </div>
       {agentOpen && <AgentModal onClose={() => setAgentOpen(false)} />}
+      {memberOpen && <Membership onClose={() => setMemberOpen(false)} />}
     </div>
   )
 }
