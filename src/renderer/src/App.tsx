@@ -32,6 +32,7 @@ export default function App(): JSX.Element {
   const dismissUpdate = useApp((s) => s.dismissUpdate)
   const setHistoryOpen = useApp((s) => s.setHistoryOpen)
   const newConversation = useApp((s) => s.newConversation)
+  const activeGen = useApp((s) => s.activeGen)
   const addPendingRefs = useApp((s) => s.addPendingRefs)
   const [showMember, setShowMember] = useState(false)
 
@@ -111,14 +112,16 @@ export default function App(): JSX.Element {
           <button
             title="历史对话"
             onClick={() => setHistoryOpen(true)}
-            className="w-8 h-8 grid place-items-center rounded-lg text-gray-300 hover:bg-white/10"
+            disabled={activeGen > 0}
+            className="w-8 h-8 grid place-items-center rounded-lg text-gray-300 hover:bg-white/10 disabled:opacity-40"
           >
             <History size={18} />
           </button>
           <button
             title="新对话"
             onClick={() => newConversation()}
-            className="w-8 h-8 grid place-items-center rounded-lg text-gray-300 hover:bg-white/10"
+            disabled={activeGen > 0}
+            className="w-8 h-8 grid place-items-center rounded-lg text-gray-300 hover:bg-white/10 disabled:opacity-40"
           >
             <Plus size={18} />
           </button>

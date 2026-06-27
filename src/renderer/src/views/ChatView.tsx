@@ -14,7 +14,7 @@ import {
   CreditCard,
   Check
 } from 'lucide-react'
-import { useApp } from '../store/app'
+import { useApp, MAX_CONCURRENT } from '../store/app'
 import type { ChatMessage } from '@shared/types'
 import type { ModelMeta } from '../lib/api'
 import { extractImages, compressDataUrl } from '../lib/files'
@@ -64,6 +64,7 @@ function modelLabel(m: string, meta?: ModelMeta): string {
 export function ChatView(): JSX.Element {
   const messages = useApp((s) => s.messages)
   const generating = useApp((s) => s.generating)
+  const activeGen = useApp((s) => s.activeGen)
   const genStatus = useApp((s) => s.genStatus)
   const generate = useApp((s) => s.generate)
   const clearChat = useApp((s) => s.clearChat)
@@ -197,7 +198,7 @@ export function ChatView(): JSX.Element {
   async function send(prompt?: string): Promise<void> {
     const p = (prompt ?? text).trim()
     // 必须有文字描述（即使带了参考图，gpt-image 也要求描述想要的画面，否则会报错）
-    if (!p || generating) return
+    if (!p || ((chatMode || designMode) ? generating : activeGen >= MAX_CONCURRENT)) return
     // 对话模式：走 GPT 沟通（按点数计费，由服务端权威扣点）
     if (designMode) { setText(''); const r = refs; setRefs([]); await runDesign(p, designPreview, r); return }
     if (chatMode) { setText(''); const r = refs; setRefs([]); await chatSend(p, r); return }
@@ -312,10 +313,10 @@ export function ChatView(): JSX.Element {
                     ))}
                   </ol>
                   <div className="text-amber-300 text-[13px] mb-2">预计消耗约 {(modelMeta[qModels[0]]?.credits || 10) * m.design.length} 点（每张约 {modelMeta[qModels[0]]?.credits || 10} 点，按成功产出的张数实际扣点）</div>
-                  <button className="btn-primary px-3.5 py-2 text-sm inline-flex items-center gap-1.5" disabled={generating} onClick={() => genDesign(m.design!)}><CreditCard size={14} /> 我已充值，继续生成剩余 {m.design.length} 张</button>
+                  <button className="btn-primary px-3.5 py-2 text-sm inline-flex items-center gap-1.5" disabled={generating || activeGen > 0} onClick={() => genDesign(m.design!)}><CreditCard size={14} /> 我已充值，继续生成剩余 {m.design.length} 张</button>
                 </div>
               ) : (
-                <DesignCardDesktop key={i} msg={m} generating={generating} per={modelMeta[qModels[0]]?.credits || 10} onGenerate={genDesign} onReplan={replanDesign} />
+                <DesignCardDesktop key={i} msg={m} generating={generating || activeGen > 0} per={modelMeta[qModels[0]]?.credits || 10} onGenerate={genDesign} onReplan={replanDesign} />
               )
             ) : (
               <Bubble
@@ -331,7 +332,7 @@ export function ChatView(): JSX.Element {
             )
           )}
 
-          {generating && <ProgressCard status={genStatus} onAbort={canAbort ? abortGenerate : undefined} />}
+          {(generating || activeGen > 0) && <ProgressCard status={generating ? genStatus : `${activeGen} 张正在生成中…（可继续创建，最多 ${MAX_CONCURRENT} 张同时）`} onAbort={(generating ? canAbort : true) ? abortGenerate : undefined} />}
         </div>
       </div>
 
@@ -470,7 +471,8 @@ export function ChatView(): JSX.Element {
             {messages.length > 0 && (
               <button
                 onClick={clearChat}
-                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 ml-auto"
+                disabled={generating || activeGen > 0}
+                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 ml-auto disabled:opacity-40"
               >
                 <Trash2 size={13} /> 清空
               </button>
@@ -502,7 +504,7 @@ export function ChatView(): JSX.Element {
             <button
               className="btn-primary h-[52px] px-4"
               onClick={() => send()}
-              disabled={generating || (!text.trim() && !((designMode || !chatMode) && refs.length > 0))}
+              disabled={((chatMode || designMode) ? generating : activeGen >= MAX_CONCURRENT) || (!text.trim() && !((designMode || !chatMode) && refs.length > 0))}
               title={!text.trim() ? '请输入文字描述' : '生成'}
             >
               {generating ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
@@ -564,6 +566,7 @@ function Bubble({
 }): JSX.Element {
   const isUser = msg.role === 'user'
   const generating = useApp((s) => s.generating)
+  const activeGen = useApp((s) => s.activeGen)
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div className={`max-w-[80%] ${isUser ? 'items-end' : 'items-start'} flex flex-col gap-2`}>
@@ -604,7 +607,7 @@ function Bubble({
           </button>
         )}
         {!isUser && msg.retry && (
-          <button onClick={() => onRegenFail(idx)} disabled={generating} className="btn-soft py-1 px-2.5 text-xs self-start flex items-center gap-1 disabled:opacity-50">
+          <button onClick={() => onRegenFail(idx)} disabled={generating || activeGen >= MAX_CONCURRENT} className="btn-soft py-1 px-2.5 text-xs self-start flex items-center gap-1 disabled:opacity-50">
             <RefreshCw size={13} /> 重新生成
           </button>
         )}

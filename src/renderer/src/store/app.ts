@@ -17,6 +17,8 @@ async function genOneJob(
   reqBody: { prompt: string; model: string; size?: string; reqId: string; initImages?: string[] },
   ac: AbortController
 ): Promise<{ img?: string; quota?: Quota; err?: string; needRecharge?: boolean }> {
+  // 问题二A/B：中止时通知后端取消该后台任务，释放并发槽、杜绝幽灵继续跑并扣费(并发池下每张各自 reqId)。
+  ac.signal.addEventListener('abort', () => { void api.cancelGenerate(reqBody.reqId) }, { once: true })
   let sub: Awaited<ReturnType<typeof api.generate>>
   try {
     // noFallback：设计批量是精确任务，某张失败就如实失败(不扣费、可重生成)，不静默换兜底模型补近似图还扣费。
@@ -135,7 +137,8 @@ interface AppStore {
 
   // 对话
   messages: ChatMessage[]
-  generating: boolean
+  generating: boolean // chat/设计工坊/拆解等"整体阻塞"操作用
+  activeGen: number // 问题二B：普通生图并发任务数(允许 ≤MAX_CONCURRENT 同时生)
   genStatus: string
   needRecharge: boolean
   editorImage?: string
@@ -196,9 +199,12 @@ interface AppStore {
   abortGenerate: () => void
 }
 
-let genAC: AbortController | null = null // 当前生图请求的中止控制器
-let genReqId: string | null = null // 当前生图的 reqId（用于通知服务端中止）
+let genAC: AbortController | null = null // 设计工坊整批的中止控制器
 let designRefs: string[] = [] // 设计工坊本次上传的参考图（整套设计沿用；预览确认/续生成共用）
+// 问题二B(桌面)：普通生图并发任务的中止器(reqId→cancel)，供「全部中止」。
+const genJobs = new Map<string, () => void>()
+// 普通生图前端并发上限(与后端 user_concurrency 默认一致；后端为权威，超出 429 兜底)。
+export const MAX_CONCURRENT = 3
 
 export const useApp = create<AppStore>((set, get) => ({
   ready: false,
@@ -212,6 +218,7 @@ export const useApp = create<AppStore>((set, get) => ({
   view: 'chat',
   messages: [],
   generating: false,
+  activeGen: 0,
   genStatus: '',
   needRecharge: false,
   editorImage: undefined,
@@ -234,16 +241,19 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ convList: await convMetas() })
   },
   async newConversation() {
+    if (get().activeGen > 0) return // 问题二B：有图在并发生成中，禁止切/建会话，否则在飞任务完成后会把图落入新会话造成错乱
     // 免费用户不保留多段历史：开新对话时删掉旧的
     if (!get().account?.quota.memberActive) await convDel(get().convId)
     set({ convId: uid(), messages: [], historyOpen: false, view: 'chat' })
     set({ convList: await convMetas() })
   },
   async openConversation(id) {
+    if (get().activeGen > 0) return // 问题二B：生图并发中禁止切会话(防在飞任务把图落入别的会话)
     const msgs = await convLoad(id)
     set({ convId: id, messages: msgs, historyOpen: false, view: 'chat' })
   },
   async deleteConversation(id) {
+    if (get().activeGen > 0) return // 生图并发中暂不删会话(防误删当前会话清空在飞结果)
     await convDel(id)
     const list = await convMetas()
     set({ convList: list })
@@ -389,11 +399,11 @@ export const useApp = create<AppStore>((set, get) => ({
     // 对话带参考图时可强制用支持参考图的模型（modelOverride）；否则用所选模型
     const model = opts?.modelOverride || get().selectedModel
     if (!model) {
-      set({ messages: [...get().messages, { role: 'assistant', content: '暂无可用模型，请稍后重试' }] })
+      set((s) => ({ messages: [...s.messages, { role: 'assistant', content: '暂无可用模型，请稍后重试' }] }))
       return
     }
+    if (get().activeGen >= MAX_CONCURRENT) return // 问题二B：达并发上限，先等一张完成
     // 按 meta 收口：标准档（或模型不支持参考图）一律丢弃参考图，并把不支持的画幅回退到 1:1。
-    // 这样即使 UI 残留了参考图/比例，也不会发出该模型拒绝的请求。
     const meta = get().modelMeta[model] || DEFAULT_META
     let refImages = opts?.initImages?.length ? opts.initImages : opts?.initImage ? [opts.initImage] : []
     if (!meta.ref) refImages = []
@@ -402,142 +412,88 @@ export const useApp = create<AppStore>((set, get) => ({
     if (!trimmed && refImages.length === 0) return
 
     const userMsg: ChatMessage = { role: 'user', content: trimmed, images: refImages.length ? refImages : undefined }
+    // 问题二B：并发生图——本任务独立 reqId/AbortController，记入 genJobs 供「全部中止」，用 activeGen 计数(不占全局 generating)。
+    // 所有消息更新一律用函数式 set((s)=>...)，避免多张并发时 [...get().messages] 读旧值互相覆盖。
     const ac = new AbortController()
-    genAC = ac
-    set({ messages: [...get().messages, userMsg], generating: true, genStatus: '正在生成…', canAbort: true })
-
-    const size = ratioKey ? modelSizeFor(ratioKey) : undefined
-    // 所选画质长边：传给后端计高清加点（hdEdge≥阈值时按 pricing.hdSurcharge 加点）
-    const hdEdge = opts?.qualityKey ? qualityLongEdge(opts.qualityKey) : undefined
-    // 稳定的 reqId：3 次重试共用同一个，服务端据此幂等去重，避免重复扣费
     const reqId = crypto.randomUUID()
-    genReqId = reqId
-    const reqBody = {
-      prompt: trimmed,
-      size,
-      model,
-      initImages: refImages.length ? refImages : undefined,
-      mask: opts?.mask,
-      reqId,
-      hdEdge,
-      // 局部重绘=精确改图：失败不静默换兜底模型补近似图（近似图无意义且会让用户觉得"白扣费"）。
-      noFallback: opts?.mask ? true : undefined
-    }
-
-    // 异步保活：提交后台生成 → 每 3s 轮询，单次持续直到出图/失败/取消（取消多次重试，穿透 Cloudflare ~100s）。
-    type GenRes = Awaited<ReturnType<typeof api.generate>>
-    let res: GenRes | null = null
-    let lastErr = '生成失败，请稍后再试'
-    let busyMsg = ''
-    let sub: GenRes
+    genJobs.set(reqId, () => { void api.cancelGenerate(reqId); ac.abort() })
+    set((s) => ({ messages: [...s.messages, userMsg], activeGen: s.activeGen + 1 }))
     try {
-      sub = await api.generate({ ...reqBody, async: true }, ac.signal)
-    } catch {
-      sub = { ok: false, status: 0, data: { error: '网络异常，无法连接服务器' } } as GenRes
-    }
-    if (!ac.signal.aborted) {
-      if (sub.status === 429) busyMsg = sub.data?.error || '上一张还在收尾，请等几秒再试'
-      else if (sub.status === 200 && sub.data?.images?.length) res = sub // 提交即命中缓存
-      else if (sub.status === 202 || (sub.data as { accepted?: boolean })?.accepted) {
-        const t0 = Date.now()
-        while (!ac.signal.aborted && Date.now() - t0 < 315_000) {
-          await waitAbortable(3000, ac.signal)
-          if (ac.signal.aborted) break
-          set({ genStatus: `正在生成…（已 ${Math.round((Date.now() - t0) / 1000)}s，通常 1–3 分钟）· 可中止` })
-          let st: Awaited<ReturnType<typeof api.generateStatus>>
-          try {
-            st = await api.generateStatus(reqId, ac.signal)
-          } catch {
-            continue
-          }
-          if (ac.signal.aborted) break
-          const state = st.data?.state
-          if (state === 'done') {
-            res = { ok: st.data.status === 200, status: st.data.status ?? 0, data: st.data.result || {} } as GenRes
-            break
-          }
-          if (state === 'missing') {
-            lastErr = '生成任务已丢失，请重试'
-            break
-          }
-        }
-        if (!res && !ac.signal.aborted && lastErr === '生成失败，请稍后再试') lastErr = '生成超时了，请重试或换个模型'
-      } else lastErr = sub.data?.error || lastErr
-    }
-
-    genAC = null
-    // 用户中止：未出图不计费（服务端在出图后才扣，中止即不扣）；刷新额度如实显示
-    if (ac.signal.aborted) {
-      set({
-        messages: [...get().messages, { role: 'assistant', content: '已中止生成（未出图，不计费）' }],
-        generating: false,
-        genStatus: '',
-        canAbort: false
-      })
-      await get().refreshMe()
-      return
-    }
-    set({ canAbort: false })
-    // 忙（上一张还在收尾，达并发上限）
-    if (busyMsg) {
-      set({ messages: [...get().messages, { role: 'assistant', content: `${busyMsg}` }], generating: false, genStatus: '', canAbort: false })
-      return
-    }
-    // 额度不足
-    if (res && (res.status === 402 || res.data?.needRecharge)) {
-      set({ messages: [...get().messages, { role: 'assistant', content: '额度已用完，请开通或升级会员后再试。' }], generating: false, genStatus: '', canAbort: false, needRecharge: true })
-      return
-    }
-    // 校验/审核类错误
-    if (res && res.status === 400) {
-      set({ messages: [...get().messages, { role: 'assistant', content: `${res.data?.error ?? '请求有误，请修改后重试'}` }], generating: false, genStatus: '', canAbort: false })
-      return
-    }
-    const success = !!(res && res.ok && res.data.images && res.data.images.length)
-    if (!success) {
-      // 需求1：普通生图失败带上重生参数（局部重绘 mask 任务除外）。
-      // 问题一：网络/超时类失败——这张可能已在后台生成完成(进云作品库且已扣额度)，提示去云库查看并刷新额度；确定性失败保留原文案。
-      const networky = !res && /网络|超时|timeout/i.test(lastErr)
-      const msg = networky ? '网络不稳定，这张可能已在后台生成完成——请到「云作品库」查看；若没有再点重新生成。' : `${res?.data?.error || lastErr}`
-      set({
-        messages: [...get().messages, { role: 'assistant', content: msg, retry: opts?.mask ? undefined : { kind: 'gen', prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey, model } }],
-        generating: false,
-        genStatus: ''
-      })
-      void get().refreshMe()
-      return
-    }
-
-    let images = res!.data.images as string[]
-    // 高清化（本地 Lanczos 按长边等比放大，保持原图比例，绝不裁切）
-    if (opts?.qualityKey && images.length) {
-      const long = qualityLongEdge(opts.qualityKey)
-      // 只有当目标长边大于模型出图(约 1024/1536)时才放大，避免无谓处理
-      if (long > 1536) {
-        set({ genStatus: '正在生成高清大图…' })
-        images = await Promise.all(
-          images.map(async (d) => {
-            const r = await window.api.image.process({ dataUrl: d, width: long, height: long, fit: 'inside' })
-            return r.ok && r.dataUrl ? r.dataUrl : d
-          })
-        )
+      const size = ratioKey ? modelSizeFor(ratioKey) : undefined
+      const hdEdge = opts?.qualityKey ? qualityLongEdge(opts.qualityKey) : undefined
+      const reqBody = {
+        prompt: trimmed, size, model,
+        initImages: refImages.length ? refImages : undefined,
+        mask: opts?.mask, reqId, hdEdge,
+        // 局部重绘=精确改图：失败不静默换兜底模型补近似图。
+        noFallback: opts?.mask ? true : undefined
       }
+      type GenRes = Awaited<ReturnType<typeof api.generate>>
+      let res: GenRes | null = null
+      let lastErr = '生成失败，请稍后再试'
+      let busyMsg = ''
+      let sub: GenRes
+      try {
+        sub = await api.generate({ ...reqBody, async: true }, ac.signal)
+      } catch {
+        sub = { ok: false, status: 0, data: { error: '网络异常，无法连接服务器' } } as GenRes
+      }
+      if (!ac.signal.aborted) {
+        if (sub.status === 429) busyMsg = sub.data?.error || '当前同时生成的张数已达上限，请等其中一张完成再试'
+        else if (sub.status === 200 && sub.data?.images?.length) res = sub
+        else if (sub.status === 202 || (sub.data as { accepted?: boolean })?.accepted) {
+          const t0 = Date.now()
+          while (!ac.signal.aborted && Date.now() - t0 < 315_000) {
+            await waitAbortable(3000, ac.signal)
+            if (ac.signal.aborted) break
+            let st: Awaited<ReturnType<typeof api.generateStatus>>
+            try { st = await api.generateStatus(reqId, ac.signal) } catch { continue }
+            if (ac.signal.aborted) break
+            const state = st.data?.state
+            if (state === 'done') { res = { ok: st.data.status === 200, status: st.data.status ?? 0, data: st.data.result || {} } as GenRes; break }
+            if (state === 'missing') { lastErr = '生成任务已丢失，请重试'; break }
+          }
+          if (!res && !ac.signal.aborted && lastErr === '生成失败，请稍后再试') lastErr = '生成超时了，请重试或换个模型'
+        } else lastErr = sub.data?.error || lastErr
+      }
+      // 用户中止：未出图不计费；刷新额度如实显示
+      if (ac.signal.aborted) {
+        set((s) => ({ messages: [...s.messages, { role: 'assistant', content: '已中止生成（未出图，不计费）' }] }))
+        await get().refreshMe()
+        return
+      }
+      if (busyMsg) { set((s) => ({ messages: [...s.messages, { role: 'assistant', content: `${busyMsg}` }] })); return }
+      if (res && (res.status === 402 || res.data?.needRecharge)) {
+        set((s) => ({ messages: [...s.messages, { role: 'assistant', content: '额度已用完，请开通或升级会员后再试。' }], needRecharge: true }))
+        return
+      }
+      if (res && res.status === 400) { set((s) => ({ messages: [...s.messages, { role: 'assistant', content: `${res.data?.error ?? '请求有误，请修改后重试'}` }] })); return }
+      const success = !!(res && res.ok && res.data.images && res.data.images.length)
+      if (!success) {
+        // 问题一：网络/超时类失败——这张可能已在后台生成完成(进云作品库且已扣额度)，提示去云库查看并刷新额度；确定性失败保留原文案。
+        const networky = !res && /网络|超时|timeout/i.test(lastErr)
+        const msg = networky ? '网络不稳定，这张可能已在后台生成完成——请到「云作品库」查看；若没有再点重新生成。' : `${res?.data?.error || lastErr}`
+        set((s) => ({ messages: [...s.messages, { role: 'assistant', content: msg, retry: opts?.mask ? undefined : { kind: 'gen', prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey, model } }] }))
+        void get().refreshMe()
+        return
+      }
+      let images = res!.data.images as string[]
+      // 高清化（本地 Lanczos 按长边等比放大，绝不裁切）
+      if (opts?.qualityKey && images.length) {
+        const long = qualityLongEdge(opts.qualityKey)
+        if (long > 1536) {
+          images = await Promise.all(images.map(async (d) => { const r = await window.api.image.process({ dataUrl: d, width: long, height: long, fit: 'inside' }); return r.ok && r.dataUrl ? r.dataUrl : d }))
+        }
+      }
+      const note = res!.data.fallback ? (res!.data.approx ? '参考图通道繁忙，已根据图片描述生成「近似图」（非精确改图，仅供参考）' : '高质量模型当前繁忙，已用「极速」模型为你生成（风格可能略有不同）') : undefined
+      const assistant: ChatMessage = { role: 'assistant', content: res!.data.text ?? '', images, note, src: { prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey } }
+      const quota = res!.data.quota
+      set((s) => { const p: Partial<AppStore> = { messages: [...s.messages, assistant] }; if (quota && s.account) p.account = { ...s.account, quota }; return p })
+      void get().persistConv()
+    } finally {
+      set((s) => ({ activeGen: Math.max(0, s.activeGen - 1) }))
+      genJobs.delete(reqId)
     }
-    // 后端返回 fallback=true 时：所选模型繁忙失败、已自动用「极速」模型补出这张图。
-    // approx=true 表示是「按参考图描述生成的近似图」（参考图通道都失败的兜底，非精确改图）。
-    const note = res!.data.fallback
-      ? res!.data.approx
-        ? '参考图通道繁忙，已根据图片描述生成「近似图」（非精确改图，仅供参考）'
-        : '高质量模型当前繁忙，已用「极速」模型为你生成（风格可能略有不同）'
-      : undefined
-    const assistant: ChatMessage = { role: 'assistant', content: res!.data.text ?? '', images, note, src: { prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey } }
-    const patch: Partial<AppStore> = { messages: [...get().messages, assistant], generating: false, genStatus: '' }
-    if (res!.data.quota) {
-      const acc = get().account
-      if (acc) patch.account = { ...acc, quota: res!.data.quota }
-    }
-    set(patch)
-    void get().persistConv()
   },
 
   clearChat: () => { void get().newConversation() },
@@ -551,6 +507,7 @@ export const useApp = create<AppStore>((set, get) => ({
     const p = brief.trim()
     const curRefs = refs || []
     if ((!p && curRefs.length === 0) || get().generating) return
+    if (get().activeGen > 0) { set((s) => ({ messages: [...s.messages, { role: 'assistant', content: '当前还有图在生成中，请等它完成后再启动设计工坊。' }] })); return } // 防：生图飞行时拆解会扣额度却静默不出图
     designRefs = curRefs // 整套设计沿用这批参考图
     set({ messages: [...get().messages, { role: 'user', content: p || '（参考图设计）', images: curRefs.length ? curRefs : undefined }], generating: true, genStatus: '正在拆解设计需求…' })
     let r: Awaited<ReturnType<typeof api.designPlan>>
@@ -585,7 +542,7 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async genDesign(items) {
-    if (get().generating) return
+    if (get().generating || get().activeGen > 0) return
     const { models, modelMeta, selectedModel } = get()
     // 有参考图：用支持参考图的模型，让整套图基于上传的 logo/产品图等保持一致
     const useModel = designRefs.length
@@ -596,66 +553,59 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ generating: true, canAbort: true, genStatus: '正在生成…' })
     let doneN = 0
     let paused = false
-    for (let i = 0; i < items.length; i++) {
+    // 问题二B：设计工坊小并发池——每批 MAX_CONCURRENT 张并行(批间串行)，提速又不打爆中转站/触发熔断；保住"点数不足即暂停"。
+    for (let i = 0; i < items.length && !ac.signal.aborted && !paused; i += MAX_CONCURRENT) {
+      const batch = items.slice(i, i + MAX_CONCURRENT)
+      set({ genStatus: `正在并行生成第 ${i + 1}–${Math.min(i + MAX_CONCURRENT, items.length)}/${items.length} 张…（可中止）` })
+      const results = await Promise.all(batch.map((it) => genOneJob({ prompt: it.prompt, model: useModel, size: modelSizeFor(it.ratio), reqId: crypto.randomUUID(), initImages: designRefs.length ? designRefs : undefined }, ac)))
       if (ac.signal.aborted) break
-      set({ genStatus: `正在生成第 ${i + 1}/${items.length} 张：${items[i].title}…（可中止）` })
-      const reqId = crypto.randomUUID()
-      genReqId = reqId
-      const r = await genOneJob({ prompt: items[i].prompt, model: useModel, size: modelSizeFor(items[i].ratio), reqId, initImages: designRefs.length ? designRefs : undefined }, ac)
-      if (ac.signal.aborted) break
-      if (r.needRecharge) {
-        paused = true
-        const remaining = items.slice(i)
-        set({
-          messages: [
-            ...get().messages,
-            { role: 'assistant', content: `点数不足，本套设计已暂停（还剩 ${remaining.length} 张未生成）。请到「会员」充值/升级或邀请好友，然后点下方按钮继续。` },
-            { role: 'assistant', content: '', design: remaining, resume: true }
-          ],
-          needRecharge: true
-        })
-        break
+      const shortfall: { title: string; prompt: string; ratio: string }[] = []
+      for (let j = 0; j < results.length; j++) {
+        const r = results[j], it = batch[j]
+        if (r.needRecharge) { shortfall.push(it); continue }
+        if (r.img) { const img = r.img; set((s) => ({ messages: [...s.messages, { role: 'assistant', content: '', images: [img], note: `【${it.title}】${it.ratio}`, src: { prompt: it.prompt, refs: designRefs.length ? designRefs : undefined, ratio: it.ratio } }] })); doneN++ }
+        else set((s) => ({ messages: [...s.messages, { role: 'assistant', content: `第 ${i + j + 1} 张「${it.title}」生成失败：${r.err}`, retry: { kind: 'design', prompt: it.prompt, refs: designRefs.length ? designRefs : undefined, ratio: it.ratio, model: useModel } }] }))
       }
-      if (r.img) {
-        const it = items[i]
-        set({ messages: [...get().messages, { role: 'assistant', content: '', images: [r.img], note: `【${it.title}】${it.ratio}`, src: { prompt: it.prompt, refs: designRefs.length ? designRefs : undefined, ratio: it.ratio } }] })
-        doneN++
-      } else {
-        set({ messages: [...get().messages, { role: 'assistant', content: `第 ${i + 1} 张「${items[i].title}」生成失败：${r.err}`, retry: { kind: 'design', prompt: items[i].prompt, refs: designRefs.length ? designRefs : undefined, ratio: items[i].ratio, model: useModel } }] })
+      if (shortfall.length) {
+        paused = true
+        const remaining = [...shortfall, ...items.slice(i + MAX_CONCURRENT)]
+        set((s) => ({ messages: [...s.messages, { role: 'assistant', content: `点数不足，本套设计已暂停（还剩 ${remaining.length} 张未生成）。请到「会员」充值/升级或邀请好友，然后点下方按钮继续。` }, { role: 'assistant', content: '', design: remaining, resume: true }], needRecharge: true }))
       }
     }
     genAC = null
     set({ generating: false, canAbort: false, genStatus: '' })
     await get().refreshMe()
     if (!paused) {
-      set({ messages: [...get().messages, { role: 'assistant', content: ac.signal.aborted ? `已中止（已完成 ${doneN}/${items.length} 张）` : `这套设计已生成完毕（共 ${doneN}/${items.length} 张）。` }] })
+      set((s) => ({ messages: [...s.messages, { role: 'assistant', content: ac.signal.aborted ? `已中止（已完成 ${doneN}/${items.length} 张）` : `这套设计已生成完毕（共 ${doneN}/${items.length} 张）。` }] }))
     }
   },
-  // 需求1：对某条失败消息重生该项（普通生图/设计工坊单张），原位替换结果，不影响其它项。
+  // 需求1：对某条失败消息重生该项（普通生图/设计工坊单张），原位替换结果，不影响其它项。问题二B：算一个并发任务、不占全局 generating。
   async regenMessage(idx) {
-    if (get().generating) return
+    if (get().generating || get().activeGen >= MAX_CONCURRENT) return
     const rt = get().messages[idx]?.retry
     if (!rt) return
     const ac = new AbortController()
-    genAC = ac
     const reqId = crypto.randomUUID()
-    genReqId = reqId
-    set({ generating: true, canAbort: true, genStatus: '正在重新生成…' })
-    const r = await genOneJob({ prompt: rt.prompt, model: rt.model || get().selectedModel, size: rt.ratio ? modelSizeFor(rt.ratio) : undefined, reqId, initImages: rt.refs?.length ? rt.refs : undefined }, ac)
-    genAC = null
-    set({ generating: false, canAbort: false, genStatus: '' })
-    if (ac.signal.aborted) return
-    if (r.needRecharge) { set({ messages: get().messages.map((x, j) => (j === idx ? { ...x, content: '额度已用完，请开通或升级会员后再试。', retry: rt } : x)), needRecharge: true }); return }
-    if (r.img) {
-      const img = r.img
-      set({ messages: get().messages.map((x, j) => (j === idx ? { role: 'assistant', content: '', images: [img], note: rt.kind === 'design' ? '已重新生成' : undefined, src: { prompt: rt.prompt, refs: rt.refs, ratio: rt.ratio } } : x)) })
-      const acc = get().account; if (r.quota && acc) set({ account: { ...acc, quota: r.quota } })
-      void get().persistConv()
-    } else {
-      set({ messages: get().messages.map((x, j) => (j === idx ? { ...x, content: '重新生成失败：' + (r.err || '请重试'), retry: rt } : x)) })
+    genJobs.set(reqId, () => { void api.cancelGenerate(reqId); ac.abort() })
+    set((s) => ({ activeGen: s.activeGen + 1 }))
+    try {
+      const r = await genOneJob({ prompt: rt.prompt, model: rt.model || get().selectedModel, size: rt.ratio ? modelSizeFor(rt.ratio) : undefined, reqId, initImages: rt.refs?.length ? rt.refs : undefined }, ac)
+      if (ac.signal.aborted) return
+      if (r.needRecharge) { set((s) => ({ messages: s.messages.map((x, j) => (j === idx ? { ...x, content: '额度已用完，请开通或升级会员后再试。', retry: rt } : x)), needRecharge: true })); return }
+      if (r.img) {
+        const img = r.img
+        set((s) => ({ messages: s.messages.map((x, j) => (j === idx ? { role: 'assistant', content: '', images: [img], note: rt.kind === 'design' ? '已重新生成' : undefined, src: { prompt: rt.prompt, refs: rt.refs, ratio: rt.ratio } } : x)) }))
+        const q = r.quota; if (q) set((s) => (s.account ? { account: { ...s.account, quota: q } } : {}))
+        void get().persistConv()
+      } else {
+        set((s) => ({ messages: s.messages.map((x, j) => (j === idx ? { ...x, content: '重新生成失败：' + (r.err || '请重试'), retry: rt } : x)) }))
+      }
+    } finally {
+      set((s) => ({ activeGen: Math.max(0, s.activeGen - 1) }))
+      genJobs.delete(reqId)
     }
   },
-  abortGenerate: () => { if (genReqId) void api.cancelGenerate(genReqId); genAC?.abort() },
+  abortGenerate: () => { genJobs.forEach((fn) => fn()); genAC?.abort() },
 
   // 局部重绘结果同步进聊天框，保存记录
   addAssistantImage: (dataUrl) => {
