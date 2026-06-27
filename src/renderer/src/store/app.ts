@@ -241,19 +241,19 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ convList: await convMetas() })
   },
   async newConversation() {
-    if (get().activeGen > 0) return // 问题二B：有图在并发生成中，禁止切/建会话，否则在飞任务完成后会把图落入新会话造成错乱
+    if (get().activeGen > 0 || get().generating) return // 问题二B：有图在并发生成中，禁止切/建会话，否则在飞任务完成后会把图落入新会话造成错乱
     // 免费用户不保留多段历史：开新对话时删掉旧的
     if (!get().account?.quota.memberActive) await convDel(get().convId)
     set({ convId: uid(), messages: [], historyOpen: false, view: 'chat' })
     set({ convList: await convMetas() })
   },
   async openConversation(id) {
-    if (get().activeGen > 0) return // 问题二B：生图并发中禁止切会话(防在飞任务把图落入别的会话)
+    if (get().activeGen > 0 || get().generating) return // 问题二B：生图并发中禁止切会话(防在飞任务把图落入别的会话)
     const msgs = await convLoad(id)
     set({ convId: id, messages: msgs, historyOpen: false, view: 'chat' })
   },
   async deleteConversation(id) {
-    if (get().activeGen > 0) return // 生图并发中暂不删会话(防误删当前会话清空在飞结果)
+    if (get().activeGen > 0 || get().generating) return // 生图并发中暂不删会话(防误删当前会话清空在飞结果)
     await convDel(id)
     const list = await convMetas()
     set({ convList: list })
@@ -586,7 +586,7 @@ export const useApp = create<AppStore>((set, get) => ({
     if (!rt) return
     const ac = new AbortController()
     const reqId = crypto.randomUUID()
-    genJobs.set(reqId, () => { void api.cancelGenerate(reqId); ac.abort() })
+    genJobs.set(reqId, () => ac.abort()) // 中止仅断本地；后端取消由 genOneJob 的 abort 监听以同一 reqId 触发，避免重复 cancel
     set((s) => ({ activeGen: s.activeGen + 1 }))
     try {
       const r = await genOneJob({ prompt: rt.prompt, model: rt.model || get().selectedModel, size: rt.ratio ? modelSizeFor(rt.ratio) : undefined, reqId, initImages: rt.refs?.length ? rt.refs : undefined }, ac)
