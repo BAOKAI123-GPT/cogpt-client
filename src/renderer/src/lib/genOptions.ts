@@ -19,12 +19,12 @@ export const RATIOS: RatioOption[] = [
   { key: '1:1', label: '1:1 方形', size: '1024x1024', group: '方形' },
   { key: '4:5', label: '4:5 竖', size: '1024x1280', group: '竖版' },
   { key: '3:4', label: '3:4 竖', size: '1088x1440', group: '竖版' },
-  { key: '7:10', label: '7:10 A4', size: '1088x1536', group: '竖版' },
+  { key: '7:10', label: 'A4 竖', size: '1088x1536', group: '竖版' },
   { key: '2:3', label: '2:3 竖', size: '1024x1536', group: '竖版' },
   { key: '9:16', label: '9:16 竖', size: '1088x1920', group: '竖版' },
   { key: '5:4', label: '5:4 横', size: '1280x1024', group: '横版' },
   { key: '4:3', label: '4:3 横', size: '1440x1088', group: '横版' },
-  { key: '10:7', label: '10:7 A4横', size: '1536x1088', group: '横版' },
+  { key: '10:7', label: 'A4 横', size: '1536x1088', group: '横版' },
   { key: '3:2', label: '3:2 横', size: '1536x1024', group: '横版' },
   { key: '16:9', label: '16:9 横', size: '1920x1088', group: '横版' }
 ]

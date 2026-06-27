@@ -5,6 +5,12 @@ import { modelSizeFor, qualityLongEdge, ratioSupported, DEFAULT_RATIO } from '..
 
 export type Tier = 'standard' | 'quality'
 const DEFAULT_META: ModelMetaItem = { mode: 'quality', credits: 1, ref: true }
+// 可中止等待：点中止后立即结束等待，不必干等满 3 秒(问题二A：终止后尽快解锁)。
+const waitAbortable = (ms: number, signal?: AbortSignal): Promise<void> => new Promise((res) => {
+  if (signal?.aborted) return res()
+  const t = setTimeout(res, ms)
+  signal?.addEventListener('abort', () => { clearTimeout(t); res() }, { once: true })
+})
 
 // 单张异步生成（提交→轮询），供设计工坊逐张生成复用。reqBody.reqId 必填。
 async function genOneJob(
@@ -25,7 +31,7 @@ async function genOneJob(
   if (!(sub.status === 202 || (sub.data as { accepted?: boolean })?.accepted)) return { err: sub.data?.error || '提交失败' }
   const t0 = Date.now()
   while (!ac.signal.aborted && Date.now() - t0 < 315_000) {
-    await new Promise((r) => setTimeout(r, 3000))
+    await waitAbortable(3000, ac.signal)
     if (ac.signal.aborted) return { err: 'aborted' }
     let st: Awaited<ReturnType<typeof api.generateStatus>>
     try {
@@ -435,7 +441,7 @@ export const useApp = create<AppStore>((set, get) => ({
       else if (sub.status === 202 || (sub.data as { accepted?: boolean })?.accepted) {
         const t0 = Date.now()
         while (!ac.signal.aborted && Date.now() - t0 < 315_000) {
-          await new Promise((r) => setTimeout(r, 3000))
+          await waitAbortable(3000, ac.signal)
           if (ac.signal.aborted) break
           set({ genStatus: `正在生成…（已 ${Math.round((Date.now() - t0) / 1000)}s，通常 1–3 分钟）· 可中止` })
           let st: Awaited<ReturnType<typeof api.generateStatus>>
@@ -489,12 +495,16 @@ export const useApp = create<AppStore>((set, get) => ({
     }
     const success = !!(res && res.ok && res.data.images && res.data.images.length)
     if (!success) {
-      // 需求1：普通生图失败带上重生参数（局部重绘 mask 任务除外——它必须像素对齐，不做普通重生）。
+      // 需求1：普通生图失败带上重生参数（局部重绘 mask 任务除外）。
+      // 问题一：网络/超时类失败——这张可能已在后台生成完成(进云作品库且已扣额度)，提示去云库查看并刷新额度；确定性失败保留原文案。
+      const networky = !res && /网络|超时|timeout/i.test(lastErr)
+      const msg = networky ? '网络不稳定，这张可能已在后台生成完成——请到「云作品库」查看；若没有再点重新生成。' : `${res?.data?.error || lastErr}`
       set({
-        messages: [...get().messages, { role: 'assistant', content: `${res?.data?.error || lastErr}`, retry: opts?.mask ? undefined : { kind: 'gen', prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey, model } }],
+        messages: [...get().messages, { role: 'assistant', content: msg, retry: opts?.mask ? undefined : { kind: 'gen', prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey, model } }],
         generating: false,
         genStatus: ''
       })
+      void get().refreshMe()
       return
     }
 
