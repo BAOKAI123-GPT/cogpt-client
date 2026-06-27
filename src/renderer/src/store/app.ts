@@ -57,7 +57,7 @@ function initialModelTier(models: string[], meta: ModelMeta): { model: string; t
   return { model: models[0] || '', tier: 'quality' }
 }
 
-export type View = 'chat' | 'library' | 'editor' | 'settings'
+export type View = 'chat' | 'library' | 'editor' | 'settings' | 'gallery'
 const TOKEN_KEY = 'cogpt_token'
 
 interface Account {
@@ -177,6 +177,7 @@ interface AppStore {
   setDesignMode: (v: boolean) => void
   runDesign: (brief: string, preview: boolean, refs?: string[]) => Promise<void>
   genDesign: (items: { title: string; prompt: string; ratio: string }[]) => Promise<void>
+  regenMessage: (idx: number) => Promise<void> // 需求1：对失败消息原位重生该项
   replanDesign: (brief: string, count: number, adjust: string, refCount: number) => Promise<{ title: string; prompt: string; ratio: string }[] | null>
   addAssistantImage: (dataUrl: string) => void // 局部重绘结果同步进聊天
 
@@ -488,8 +489,9 @@ export const useApp = create<AppStore>((set, get) => ({
     }
     const success = !!(res && res.ok && res.data.images && res.data.images.length)
     if (!success) {
+      // 需求1：普通生图失败带上重生参数（局部重绘 mask 任务除外——它必须像素对齐，不做普通重生）。
       set({
-        messages: [...get().messages, { role: 'assistant', content: `${res?.data?.error || lastErr}` }],
+        messages: [...get().messages, { role: 'assistant', content: `${res?.data?.error || lastErr}`, retry: opts?.mask ? undefined : { kind: 'gen', prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey, model } }],
         generating: false,
         genStatus: ''
       })
@@ -609,7 +611,7 @@ export const useApp = create<AppStore>((set, get) => ({
         set({ messages: [...get().messages, { role: 'assistant', content: '', images: [r.img], note: `【${it.title}】${it.ratio}`, src: { prompt: it.prompt, refs: designRefs.length ? designRefs : undefined, ratio: it.ratio } }] })
         doneN++
       } else {
-        set({ messages: [...get().messages, { role: 'assistant', content: `第 ${i + 1} 张「${items[i].title}」生成失败：${r.err}` }] })
+        set({ messages: [...get().messages, { role: 'assistant', content: `第 ${i + 1} 张「${items[i].title}」生成失败：${r.err}`, retry: { kind: 'design', prompt: items[i].prompt, refs: designRefs.length ? designRefs : undefined, ratio: items[i].ratio, model: useModel } }] })
       }
     }
     genAC = null
@@ -617,6 +619,30 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().refreshMe()
     if (!paused) {
       set({ messages: [...get().messages, { role: 'assistant', content: ac.signal.aborted ? `已中止（已完成 ${doneN}/${items.length} 张）` : `这套设计已生成完毕（共 ${doneN}/${items.length} 张）。` }] })
+    }
+  },
+  // 需求1：对某条失败消息重生该项（普通生图/设计工坊单张），原位替换结果，不影响其它项。
+  async regenMessage(idx) {
+    if (get().generating) return
+    const rt = get().messages[idx]?.retry
+    if (!rt) return
+    const ac = new AbortController()
+    genAC = ac
+    const reqId = crypto.randomUUID()
+    genReqId = reqId
+    set({ generating: true, canAbort: true, genStatus: '正在重新生成…' })
+    const r = await genOneJob({ prompt: rt.prompt, model: rt.model || get().selectedModel, size: rt.ratio ? modelSizeFor(rt.ratio) : undefined, reqId, initImages: rt.refs?.length ? rt.refs : undefined }, ac)
+    genAC = null
+    set({ generating: false, canAbort: false, genStatus: '' })
+    if (ac.signal.aborted) return
+    if (r.needRecharge) { set({ messages: get().messages.map((x, j) => (j === idx ? { ...x, content: '额度已用完，请开通或升级会员后再试。', retry: rt } : x)), needRecharge: true }); return }
+    if (r.img) {
+      const img = r.img
+      set({ messages: get().messages.map((x, j) => (j === idx ? { role: 'assistant', content: '', images: [img], note: rt.kind === 'design' ? '已重新生成' : undefined, src: { prompt: rt.prompt, refs: rt.refs, ratio: rt.ratio } } : x)) })
+      const acc = get().account; if (r.quota && acc) set({ account: { ...acc, quota: r.quota } })
+      void get().persistConv()
+    } else {
+      set({ messages: get().messages.map((x, j) => (j === idx ? { ...x, content: '重新生成失败：' + (r.err || '请重试'), retry: rt } : x)) })
     }
   },
   abortGenerate: () => { if (genReqId) void api.cancelGenerate(genReqId); genAC?.abort() },

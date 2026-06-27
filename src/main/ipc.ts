@@ -135,6 +135,28 @@ export function registerIpc(): void {
     }
   )
 
+  // ---- 云作品库：把远程 COS 图片下载到本地（主进程拉取，绕开渲染层 CORS）----
+  ipcMain.handle('image:downloadUrl', async (e, args: { url: string; defaultName?: string }) => {
+    try {
+      const win = BrowserWindow.fromWebContents(e.sender) ?? undefined
+      const resp = await fetch(args.url)
+      if (!resp.ok) return { ok: false, error: `下载失败：HTTP ${resp.status}` }
+      const buf = Buffer.from(await resp.arrayBuffer())
+      const ct = resp.headers.get('content-type') || ''
+      const ext = ct.includes('png') ? 'png' : ct.includes('webp') ? 'webp' : 'jpg'
+      const { canceled, filePath } = await dialog.showSaveDialog(win!, {
+        title: '保存图片',
+        defaultPath: args.defaultName || `cogpt-${ext}.${ext}`,
+        filters: [{ name: ext.toUpperCase(), extensions: [ext] }]
+      })
+      if (canceled || !filePath) return { ok: false, canceled: true }
+      await writeFile(filePath, buf)
+      return { ok: true, path: filePath }
+    } catch (err: any) {
+      return { ok: false, error: String(err?.message ?? err) }
+    }
+  })
+
   ipcMain.handle('image:openMany', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender) ?? undefined
     const { canceled, filePaths } = await dialog.showOpenDialog(win!, {

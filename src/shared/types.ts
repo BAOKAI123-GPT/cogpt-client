@@ -96,6 +96,8 @@ export interface ChatMessage {
   src?: { prompt: string; refs?: string[]; ratio?: string }
   /** 设计工坊该套方案的原始需求文字，供"让 AI 补足/重排到 N 张"复用 */
   brief?: string
+  /** 需求1：失败消息携带重生该项所需参数，供失败气泡「重新生成」原位重生 */
+  retry?: { kind: 'gen' | 'design'; prompt: string; refs?: string[]; ratio?: string; model?: string }
 }
 
 export interface AppSettings {

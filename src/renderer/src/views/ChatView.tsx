@@ -82,6 +82,7 @@ export function ChatView(): JSX.Element {
   const setDesignMode = useApp((s) => s.setDesignMode)
   const runDesign = useApp((s) => s.runDesign)
   const genDesign = useApp((s) => s.genDesign)
+  const regenMessage = useApp((s) => s.regenMessage)
   const replanDesign = useApp((s) => s.replanDesign)
   const canAbort = useApp((s) => s.canAbort)
   const abortGenerate = useApp((s) => s.abortGenerate)
@@ -320,8 +321,10 @@ export function ChatView(): JSX.Element {
               <Bubble
                 key={i}
                 msg={m}
+                idx={i}
                 onEdit={setEditImage}
                 onRegen={onRegen}
+                onRegenFail={regenMessage}
                 onContextText={onContextText}
                 onContextImage={onContextImage}
               />
@@ -544,18 +547,23 @@ function ProgressCard({ status, onAbort }: { status: string; onAbort?: () => voi
 
 function Bubble({
   msg,
+  idx,
   onEdit,
   onRegen,
+  onRegenFail,
   onContextText,
   onContextImage
 }: {
   msg: ChatMessage
+  idx: number
   onEdit: (d: string) => void
   onRegen: (src: { prompt: string; refs?: string[]; ratio?: string }) => void
+  onRegenFail: (idx: number) => void
   onContextText: (e: React.MouseEvent, text: string) => void
   onContextImage: (e: React.MouseEvent, dataUrl: string) => void
 }): JSX.Element {
   const isUser = msg.role === 'user'
+  const generating = useApp((s) => s.generating)
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div className={`max-w-[80%] ${isUser ? 'items-end' : 'items-start'} flex flex-col gap-2`}>
@@ -593,6 +601,11 @@ function Bubble({
         {!isUser && msg.src && msg.images && msg.images.length > 0 && (
           <button onClick={() => onRegen(msg.src!)} className="btn-soft py-1 px-2.5 text-xs self-start flex items-center gap-1">
             <RefreshCw size={13} /> 一键重新生成（提示词/参考图已回填，可改后再生成）
+          </button>
+        )}
+        {!isUser && msg.retry && (
+          <button onClick={() => onRegenFail(idx)} disabled={generating} className="btn-soft py-1 px-2.5 text-xs self-start flex items-center gap-1 disabled:opacity-50">
+            <RefreshCw size={13} /> 重新生成
           </button>
         )}
       </div>

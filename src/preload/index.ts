@@ -78,6 +78,9 @@ const api = {
       quality?: number
     }): Promise<{ ok: boolean; path?: string; canceled?: boolean }> =>
       ipcRenderer.invoke('image:save', args),
+    // 云作品库：把远程 COS 图片下载到本地（主进程拉取，绕开渲染层 CORS）
+    downloadUrl: (args: { url: string; defaultName?: string }): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> =>
+      ipcRenderer.invoke('image:downloadUrl', args),
     openMany: (): Promise<{ ok: boolean; images: { name: string; dataUrl: string }[] }> =>
       ipcRenderer.invoke('image:openMany'),
     saveBatch: (args: {

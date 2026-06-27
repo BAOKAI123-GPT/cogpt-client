@@ -98,6 +98,9 @@ export const api = {
     req('/api/design/plan', { method: 'POST', body: JSON.stringify({ brief, refCount: refCount || 0, count: count || 0, adjust: adjust || '' }) }),
   models: (): Promise<{ ok: boolean; data: { models: string[]; meta?: ModelMeta; pricing?: Pricing } }> =>
     req('/api/models'),
+  // 云作品库（跨设备）：返回该账号 COS 历史图（含签名 URL）。enabled=false 表示后端未开启 COS。
+  history: (): Promise<{ ok: boolean; status: number; data: { enabled?: boolean; items?: { url: string; prompt: string; model: string; ratio: string; at: number }[] } }> =>
+    req('/api/history'),
   tiers: (): Promise<{
     ok: boolean
     data: { tiers: { id: string; name: string; priceCents: number; quota: number }[] }

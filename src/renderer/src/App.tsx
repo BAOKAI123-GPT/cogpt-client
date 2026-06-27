@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { MessageSquareText, Wrench, Pencil, Settings as SettingsIcon, Sparkles, Crown, History, Plus } from 'lucide-react'
+import { MessageSquareText, Wrench, Pencil, Settings as SettingsIcon, Sparkles, Crown, History, Plus, Images } from 'lucide-react'
 import { useApp, type View } from './store/app'
 import { Membership } from './components/Membership'
 import { ConversationDrawer } from './components/ConversationDrawer'
@@ -10,9 +10,11 @@ import { extractImages } from './lib/files'
 import { ResourceLibrary } from './views/ResourceLibrary'
 import { EditorView } from './views/EditorView'
 import { SettingsView } from './views/SettingsView'
+import { CloudGallery } from './views/CloudGallery'
 
 const NAV: { key: View; label: string; icon: typeof Wrench }[] = [
   { key: 'chat', label: '对话生图', icon: MessageSquareText },
+  { key: 'gallery', label: '云作品库', icon: Images },
   { key: 'library', label: '资源库', icon: Wrench },
   { key: 'editor', label: '编辑区', icon: Pencil },
   { key: 'settings', label: '设置', icon: SettingsIcon }
@@ -136,6 +138,7 @@ export default function App(): JSX.Element {
         </header>
         <main className="flex-1 min-h-0">
           {view === 'chat' && <ChatView />}
+          {view === 'gallery' && <CloudGallery />}
           {view === 'library' && <ResourceLibrary />}
           {view === 'editor' && <EditorView />}
           {view === 'settings' && <SettingsView />}
