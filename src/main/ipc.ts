@@ -2,16 +2,9 @@ import { ipcMain, dialog, app, BrowserWindow } from 'electron'
 import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises'
 import { join, basename, extname } from 'node:path'
 import { configStore } from './store'
-import { scanModels, generateImage } from './relay'
 import { getImageInfo, processImage, toBuffer, vectorizeImage, rasterizeSvg } from './image'
 import { getLogs, clearLogs, formatLogs } from './logger'
-import type {
-  ProcessImageRequest,
-  GenerateImageRequest,
-  RelayProfileInput,
-  AppSettings,
-  CustomFont
-} from '../shared/types'
+import type { ProcessImageRequest, AppSettings, CustomFont } from '../shared/types'
 
 const MIME_BY_EXT: Record<string, string> = {
   '.ttf': 'font/ttf',
@@ -25,25 +18,10 @@ export function registerIpc(): void {
   ipcMain.handle('app:getVersion', () => app.getVersion())
 
   // ---- 配置 ----
-  ipcMain.handle('config:getProfiles', () => configStore.getProfiles())
-  ipcMain.handle('config:saveProfile', (_e, input: RelayProfileInput) =>
-    configStore.saveProfile(input)
-  )
-  ipcMain.handle('config:deleteProfile', (_e, id: string) => configStore.deleteProfile(id))
-  ipcMain.handle('config:getActiveProfileId', () => configStore.getActiveProfileId())
-  ipcMain.handle('config:setActiveProfileId', (_e, id: string) =>
-    configStore.setActiveProfileId(id)
-  )
   ipcMain.handle('config:getSettings', () => configStore.getSettings())
   ipcMain.handle('config:setSettings', (_e, patch: Partial<AppSettings>) =>
     configStore.setSettings(patch)
   )
-  ipcMain.handle('config:encryptionAvailable', () => configStore.encryptionAvailable())
-
-  // ---- 会员 / 计费 ----
-  ipcMain.handle('billing:get', () => configStore.getBilling())
-  ipcMain.handle('billing:consume', () => configStore.consumeCredit())
-  ipcMain.handle('billing:recharge', (_e, amount: number) => configStore.recharge(amount))
 
   // ---- 系统日志 ----
   ipcMain.handle('log:get', () => getLogs())
@@ -59,18 +37,6 @@ export function registerIpc(): void {
     await writeFile(filePath, formatLogs(), 'utf8')
     return { ok: true, path: filePath }
   })
-
-  // ---- 中转站 ----
-  ipcMain.handle('relay:scanModels', (_e, args: { baseUrl: string; apiKey: string }) =>
-    scanModels(args.baseUrl, args.apiKey)
-  )
-  // 用已保存的 key 扫描（编辑场景，渲染进程没有原始 key）
-  ipcMain.handle('relay:scanByProfile', (_e, id: string) => {
-    const p = configStore.getRawProfile(id)
-    if (!p) return { ok: false, models: [], error: '找不到该中转站配置' }
-    return scanModels(p.baseUrl, p.apiKey)
-  })
-  ipcMain.handle('relay:generateImage', (_e, req: GenerateImageRequest) => generateImage(req))
 
   // ---- 本地图像处理 ----
   ipcMain.handle('image:info', (_e, dataUrl: string) => getImageInfo(dataUrl))

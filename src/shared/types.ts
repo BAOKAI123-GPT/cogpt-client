@@ -1,86 +1,5 @@
 // 在主进程与渲染进程之间共享的类型定义
 
-/** 生图走哪条接口流 */
-export type RelayFlow = 'auto' | 'images' | 'chat'
-
-/** 一个中转站配置（返回给渲染进程时 apiKey 被掩码，原始 key 只存在主进程） */
-export interface RelayProfile {
-  id: string
-  name: string
-  baseUrl: string
-  /** 掩码后的 key，例如 sk-Gi••••cd49，仅用于显示 */
-  apiKeyMasked: string
-  /** 是否已配置 key */
-  hasKey: boolean
-  imageModel?: string
-  chatModel?: string
-  flow: RelayFlow
-  /** 默认出图尺寸，如 1024x1024 */
-  defaultSize: string
-  createdAt: number
-}
-
-/** 保存配置时渲染进程发来的载荷；apiKey 仅在用户输入了新值时携带 */
-export interface RelayProfileInput {
-  id?: string
-  name: string
-  baseUrl: string
-  /** 明文 key；为空表示沿用已有 key（编辑场景） */
-  apiKey?: string
-  imageModel?: string
-  chatModel?: string
-  flow: RelayFlow
-  defaultSize: string
-}
-
-export type ModelKind = 'image' | 'chat' | 'unknown'
-
-export interface ModelInfo {
-  id: string
-  kind: ModelKind
-  /** 越高越可能是“gpt 生图”模型，用于自动高亮 */
-  imageScore: number
-  /** 命中的判定原因，便于在 UI 上解释 */
-  reason?: string
-}
-
-export interface ScanModelsResult {
-  ok: boolean
-  models: ModelInfo[]
-  /** 推荐默认选中的生图模型 id */
-  suggestedImageModel?: string
-  suggestedChatModel?: string
-  error?: string
-}
-
-export interface GenerateImageRequest {
-  profileId: string
-  prompt: string
-  size?: string
-  n?: number
-  /** 图生图/局部重绘时的单张输入图（dataURL）——用于 mask 局部重绘 */
-  initImage?: string
-  /** 参考图（dataURL，可多张）——对标 GPT 识图生图 */
-  initImages?: string[]
-  /** 局部重绘的 mask（dataURL，透明处=要重绘的区域） */
-  mask?: string
-}
-
-export interface GeneratedImage {
-  /** data URL（image/png 等） */
-  dataUrl: string
-}
-
-export interface GenerateImageResult {
-  ok: boolean
-  images: GeneratedImage[]
-  /** 对话流可能附带的文字回复 */
-  text?: string
-  error?: string
-  /** 实际使用的流，便于 UI 提示 */
-  usedFlow?: 'images' | 'chat'
-}
-
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
@@ -112,14 +31,6 @@ export interface AppSettings {
 export interface CustomFont {
   family: string
   path: string
-}
-
-/** 会员/计费（当前为本地实现，预留接口对接后台） */
-export interface Billing {
-  plan: string
-  monthlyQuota: number
-  credits: number
-  period: string // YYYY-MM
 }
 
 /** 本地图像处理：缩放/放大/格式转换/压缩 */

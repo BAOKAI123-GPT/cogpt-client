@@ -1,16 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppSettings,
-  Billing,
   CustomFont,
-  GenerateImageRequest,
-  GenerateImageResult,
   ImageInfo,
   ProcessImageRequest,
-  ProcessImageResult,
-  RelayProfile,
-  RelayProfileInput,
-  ScanModelsResult
+  ProcessImageResult
 } from '../shared/types'
 
 // 暴露给渲染进程的安全 API（window.api）
@@ -19,20 +13,9 @@ const api = {
     getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion')
   },
   config: {
-    getProfiles: (): Promise<RelayProfile[]> => ipcRenderer.invoke('config:getProfiles'),
-    saveProfile: (input: RelayProfileInput): Promise<RelayProfile> =>
-      ipcRenderer.invoke('config:saveProfile', input),
-    deleteProfile: (id: string): Promise<void> =>
-      ipcRenderer.invoke('config:deleteProfile', id),
-    getActiveProfileId: (): Promise<string | undefined> =>
-      ipcRenderer.invoke('config:getActiveProfileId'),
-    setActiveProfileId: (id: string): Promise<void> =>
-      ipcRenderer.invoke('config:setActiveProfileId', id),
     getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('config:getSettings'),
     setSettings: (patch: Partial<AppSettings>): Promise<AppSettings> =>
-      ipcRenderer.invoke('config:setSettings', patch),
-    encryptionAvailable: (): Promise<boolean> =>
-      ipcRenderer.invoke('config:encryptionAvailable')
+      ipcRenderer.invoke('config:setSettings', patch)
   },
   logs: {
     get: (): Promise<{ t: number; level: 'info' | 'error'; msg: string }[]> =>
@@ -40,20 +23,6 @@ const api = {
     clear: (): Promise<void> => ipcRenderer.invoke('log:clear'),
     export: (): Promise<{ ok: boolean; path?: string; canceled?: boolean }> =>
       ipcRenderer.invoke('log:export')
-  },
-  billing: {
-    get: (): Promise<Billing> => ipcRenderer.invoke('billing:get'),
-    consume: (): Promise<{ ok: boolean; credits: number }> =>
-      ipcRenderer.invoke('billing:consume'),
-    recharge: (amount: number): Promise<Billing> => ipcRenderer.invoke('billing:recharge', amount)
-  },
-  relay: {
-    scanModels: (args: { baseUrl: string; apiKey: string }): Promise<ScanModelsResult> =>
-      ipcRenderer.invoke('relay:scanModels', args),
-    scanByProfile: (id: string): Promise<ScanModelsResult> =>
-      ipcRenderer.invoke('relay:scanByProfile', id),
-    generateImage: (req: GenerateImageRequest): Promise<GenerateImageResult> =>
-      ipcRenderer.invoke('relay:generateImage', req)
   },
   image: {
     info: (dataUrl: string): Promise<ImageInfo> => ipcRenderer.invoke('image:info', dataUrl),
