@@ -704,6 +704,14 @@ function DesignCardDesktop({
     setReplanBusy(false)
     if (next && next.length) { setItems(next.map((d) => ({ ...d }))); setConfirmed(next.map(() => false)); setCount(String(next.length)); setAdjust('') }
   }
+  // 一键调整提示词：保持当前张数不变，按"需求"框内容让 AI 重写/优化各条提示词（区别于改张数的"补足/重排"）。
+  async function aiAdjustPrompts(): Promise<void> {
+    if (!adjust.trim()) { alert('请先在下方"需求"框里输入想怎么调整，例如：整体偏冷色调、风格更简约'); return }
+    setReplanBusy(true)
+    const next = await onReplan(brief, items.length, adjust.trim(), 0)
+    setReplanBusy(false)
+    if (next && next.length) { setItems(next.map((d) => ({ ...d }))); setConfirmed(next.map(() => false)); setCount(String(next.length)); setAdjust('') }
+  }
   return (
     <div className="bg-panel/60 border border-edge rounded-2xl rounded-tl-sm px-4 py-3 text-sm max-w-[92%] mb-3 leading-relaxed">
       <b>已把项目拆解为 {items.length} 张，可逐条改提示词/比例，确认后统一生成：</b>
@@ -731,13 +739,14 @@ function DesignCardDesktop({
         ))}
       </div>
       <div className="border border-dashed border-edge rounded-lg p-2.5 mb-2">
-        <div className="text-xs text-gray-400 mb-1.5">您希望将出图数量改为几张？可自行填写，并补充需要新增/删减的画面内容：</div>
+        <div className="text-xs text-gray-400 mb-1.5">在下方"需求"框写要怎么改 → 改张数点「补足/重排」；只改提示词内容(不动张数)点「一键调整提示词」：</div>
         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
           <input value={count} onChange={(e) => setCount(e.target.value.replace(/\D/g, ''))} className="field w-14 py-1 px-2 text-center text-sm" /> <span className="text-xs text-gray-400">张</span>
           <button disabled={generating || replanBusy} onClick={manualCount} className="btn-soft py-1 px-2.5 text-xs">手动改为此数</button>
           <button disabled={generating || replanBusy} onClick={aiReplan} className="btn-soft py-1 px-2.5 text-xs inline-flex items-center gap-1">{replanBusy ? 'AI 调整中…' : (<><Wand2 size={13} /> 让 AI 补足/重排</>)}</button>
+          <button disabled={generating || replanBusy} onClick={aiAdjustPrompts} className="btn-soft py-1 px-2.5 text-xs inline-flex items-center gap-1">{replanBusy ? 'AI 调整中…' : (<><Wand2 size={13} /> 一键调整提示词</>)}</button>
         </div>
-        <textarea value={adjust} onChange={(e) => setAdjust(e.target.value)} rows={2} placeholder="例：再加 3 张产品细节图、删掉海报、整体偏冷色调" className="field w-full py-1.5 px-2 text-xs resize-y" />
+        <textarea value={adjust} onChange={(e) => setAdjust(e.target.value)} rows={2} placeholder="需求，例：整体偏冷色调、风格更简约；或：再加 3 张产品细节图、删掉海报" className="field w-full py-1.5 px-2 text-xs resize-y" />
       </div>
       <div className="text-amber-300 text-[13px] mb-2">预计消耗约 {per * items.length} 点（每张约 {per} 点，按成功产出的张数实际扣点）</div>
       <button className="btn-primary px-3.5 py-2 text-sm w-full inline-flex items-center justify-center gap-1.5" disabled={generating || replanBusy || items.length === 0} onClick={() => onGenerate(items)}><Check size={15} /> 确认生成这 {items.length} 张</button>
