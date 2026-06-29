@@ -494,7 +494,13 @@ export const useApp = create<AppStore>((set, get) => ({
       if (res && res.status === 400) { rep({ role: 'assistant', content: `${res.data?.error ?? '请求有误，请修改后重试'}` }); return }
       const success = !!(res && res.ok && res.data.images && res.data.images.length)
       if (!success) {
-        // 问题一：网络/超时类失败——这张可能已在后台生成完成(进云作品库且已扣额度)，提示去云库查看并刷新额度；确定性失败保留原文案。
+        // 内容/安全拒绝：明确提示违禁/敏感，不给「重新生成」(同提示词必再被拒)、不误导去云库找。
+        if (res?.data?.contentReject) {
+          rep({ role: 'assistant', content: `${res.data.error || '检测到违禁/敏感内容，生成失败，请修改提示词或更换参考图后重试'}` })
+          void get().refreshMe()
+          return
+        }
+        // 网络/超时类失败——这张可能已在后台生成完成(进云作品库且已扣额度)，提示去云库查看并刷新额度；确定性失败保留原文案。
         const networky = !res && /网络|超时|timeout/i.test(lastErr)
         const msg = networky ? '网络不稳定，这张可能已在后台生成完成——请到「云作品库」查看；若没有再点重新生成。' : `${res?.data?.error || lastErr}`
         rep({ role: 'assistant', content: msg, retry: opts?.mask ? undefined : { kind: 'gen', prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey, model } })

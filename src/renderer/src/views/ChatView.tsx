@@ -20,6 +20,7 @@ import type { ModelMeta } from '../lib/api'
 import { extractImages, compressDataUrl } from '../lib/files'
 import { nextImgName } from '../lib/imgname'
 import { ImageEditModal } from '../components/ImageEditModal'
+import ModelArt from '../components/ModelArt'
 import {
   RATIOS,
   QUALITIES,
@@ -100,6 +101,8 @@ export function ChatView(): JSX.Element {
   const [designPreview, setDesignPreview] = useState<boolean>(() => { try { return localStorage.getItem('cogpt_design_preview') !== '0' } catch { return true } })
   // 即梦式：单行控件 + 点开「设置」弹层放详细项（档位/模型/比例/画质）
   const [panel, setPanel] = useState<'model' | 'ratio' | 'hd' | 'preview' | null>(null)
+  const [expanded, setExpanded] = useState(false)        // 即梦式：默认收起(只输入框)，点展开按钮弹出统一参数容器
+  const [inputFocused, setInputFocused] = useState(false) // 聚焦输入时全局虚化背景
   const [editImage, setEditImage] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; items: { label: string; fn: () => void }[] } | null>(null)
   const format = useApp((s) => s.settings.defaultFormat)
@@ -341,152 +344,145 @@ export function ChatView(): JSX.Element {
         </div>
       </div>
 
+      {/* 聚焦输入时全局虚化：除输入区外一切弱化 */}
+      {inputFocused && <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-md" onClick={() => { const el = document.activeElement as HTMLElement | null; el?.blur?.() }} />}
       {/* 输入区 */}
-      <div className="border-t border-edge px-6 py-3">
+      <div className={`border-t border-edge px-6 py-3 relative bg-ink ${inputFocused ? 'z-50' : ''}`}>
         <div className="max-w-3xl mx-auto">
-          {/* 参考图缩略图 */}
-          {refs.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2">
-              {refs.map((src, i) => (
-                <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden border border-edge">
-                  <img src={src} className="w-full h-full object-cover" />
-                  <button
-                    onClick={() => setRefs((p) => p.filter((_, j) => j !== i))}
-                    className="absolute top-0.5 right-0.5 bg-black/60 rounded-full p-0.5 hover:bg-black"
-                  >
-                    <X size={12} />
-                  </button>
+          {/* 展开后：一个统一参数容器，所有控件纵向分行（现有参数全保留：模型/比例/清晰度/参考图/基于上一张/设计出图方式） */}
+          {expanded && (
+            <div className="card p-4 mb-3 max-h-[56vh] overflow-y-auto divide-y divide-edge">
+              {/* 模型 */}
+              {!chatMode && !designMode && (
+                <div className="py-3">
+                  <div className="flex items-center gap-2 flex-wrap mb-2">
+                    <span className="text-[13px] font-bold text-gray-100">模型</span>
+                    <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs ml-auto">
+                      <button className={`px-3 py-1.5 whitespace-nowrap ${isStd ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setTier('standard')}>GPT快速文生图</button>
+                      <button className={`px-3 py-1.5 whitespace-nowrap ${!isStd ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setTier('quality')}>高质量GPT image2</button>
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-gray-500 mb-2">本次{hasExtra ? '约扣' : '扣'} <b className="text-gray-300">{estPoints}</b> 点{isStd ? '（通用 3 比例）' : '（可换模型 / 参考图 / 全比例；多张参考图、超清额外计点）'}</div>
+                  {!isStd && qModels.length > 1 && (
+                    <div className="flex gap-2.5 overflow-x-auto pb-1.5">
+                      {qModels.map((m) => (
+                        <button key={m} onClick={() => setSelectedModel(m)} className="shrink-0 w-20 flex flex-col items-center gap-1.5">
+                          <span className={`relative w-20 h-20 rounded-2xl overflow-hidden border ${m === selectedModel ? 'border-brand2 ring-2 ring-brand2' : 'border-edge'}`}>
+                            <ModelArt seed={m} className="w-full h-full block" />
+                            {m === selectedModel && <span className="absolute top-1 right-1 w-[18px] h-[18px] rounded-full bg-brand2 grid place-items-center"><Check size={12} className="text-white" /></span>}
+                          </span>
+                          <span className={`text-[11px] text-center leading-tight ${m === selectedModel ? 'text-white font-semibold' : 'text-gray-400'}`}>{modelLabel(m, modelMeta)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-          )}
-
-          {/* 豆包式独立面板：模型 / 比例 / 画质 各自一个 chip 点开 */}
-          {!chatMode && !designMode && panel === 'model' && (
-            <div className="card p-3 mb-2 space-y-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-gray-400 w-12 shrink-0">画质档</span>
-                <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
-                  <button className={`px-3 py-1.5 whitespace-nowrap ${isStd ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setTier('standard')}>GPT快速文生图</button>
-                  <button className={`px-3 py-1.5 whitespace-nowrap ${!isStd ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setTier('quality')}>高质量GPT image2</button>
-                </div>
-                <span className="text-[11px] text-gray-500">本次{hasExtra ? '约扣' : '扣'} <b className="text-gray-300">{estPoints}</b> 点{isStd ? '（通用 3 比例）' : '（可换模型 / 参考图 / 全比例）'}</span>
-              </div>
-              {!isStd && qModels.length > 1 && (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs text-gray-400 w-12 shrink-0">模型</span>
-                  {qModels.map((m) => (
-                    <button key={m} onClick={() => setSelectedModel(m)} className={`px-2.5 py-1 rounded-md text-xs ${m === selectedModel ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10 text-gray-300'}`}>{modelLabel(m, modelMeta)}</button>
+              )}
+              {/* 画面比例 */}
+              {!chatMode && !designMode && (
+                <div className="py-3">
+                  <div className="text-[13px] font-bold text-gray-100 mb-2">画面比例{!modelSupportsAnyRatio(selectedModel) && (<span className="text-amber-300/80 font-normal text-[11px]"> （{modelLabel(selectedModel, modelMeta)} 仅 3 比例，9:16 等请切高质量）</span>)}</div>
+                  {modelSupportsAnyRatio(selectedModel) && (
+                    <div className="flex items-start gap-2 mb-2">
+                      <span className="text-xs font-bold shrink-0 w-8 mt-2 text-violet-300">智能</span>
+                      <div className="flex flex-wrap gap-3 flex-1">
+                        <button title="有参考图时按第一张的原始比例；无参考图则用方形" onClick={() => setRatio('orig')} className="flex flex-col items-center gap-1.5 w-12">
+                          <span className="h-[46px] grid place-items-center"><span className={`grid place-items-center rounded-[5px] border-[1.5px] text-xs font-bold ${ratio === 'orig' ? 'border-brand2 bg-brand2/20 text-brand2' : 'border-gray-500 text-gray-400'}`} style={{ width: 30, height: 30 }}>原</span></span>
+                          <span className={`text-[11px] ${ratio === 'orig' ? 'text-brand2 font-semibold' : 'text-gray-400'}`}>原比例</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {(['竖版', '方形', '横版'] as const).map((g) => (
+                    <div key={g} className="flex items-start gap-2 mb-2">
+                      <span className={`text-xs font-bold shrink-0 w-8 mt-2 ${g === '方形' ? 'text-violet-300' : g === '竖版' ? 'text-cyan-300' : 'text-amber-300'}`}>{g}</span>
+                      <div className="flex flex-wrap gap-3 flex-1">
+                        {RATIOS.filter((r) => r.group === g).map((r) => {
+                          const ok = ratioSupported(selectedModel, r.key)
+                          const [rw, rh] = r.key.split(':').map(Number)
+                          const mx = 30, bw = rw >= rh ? mx : Math.round((mx * rw) / rh), bh = rw >= rh ? Math.round((mx * rh) / rw) : mx
+                          return (
+                            <button key={r.key} disabled={!ok} title={ok ? '' : '当前模型不支持该比例'} onClick={() => { if (ok) setRatio(r.key) }} className={`flex flex-col items-center gap-1.5 w-12 ${!ok ? 'opacity-30 cursor-not-allowed' : ''}`}>
+                              <span className="h-[46px] grid place-items-center"><span className={`rounded-[5px] border-[1.5px] ${r.key === ratio ? 'border-brand2 bg-brand2/20' : !ok ? 'border-gray-600 border-dashed' : 'border-gray-500'}`} style={{ width: bw, height: bh }} /></span>
+                              <span className={`text-[11px] ${r.key === ratio ? 'text-brand2 font-semibold' : 'text-gray-400'}`}>{r.key}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
-              {refAllowed && (
-                <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
-                  <input type="checkbox" checked={continueEdit} disabled={!lastAssistantImage} onChange={(e) => setContinueEdit(e.target.checked)} />
-                  <RefreshCw size={13} /> 基于上一张继续改
-                </label>
-              )}
-              <p className="text-[10px] text-gray-600">多张参考图、超清（2K/4K）会额外计点；最终扣点以服务端为准。</p>
-            </div>
-          )}
-          {!chatMode && !designMode && panel === 'ratio' && (
-            <div className="card p-3 mb-2">
-              <div className="text-xs text-gray-400 mb-1.5">画面比例{!modelSupportsAnyRatio(selectedModel) && (<span className="text-amber-300/80 font-normal"> （{modelLabel(selectedModel, modelMeta)} 仅 3 比例，9:16 等请切高质量）</span>)}</div>
-              {modelSupportsAnyRatio(selectedModel) && (
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-xs font-bold shrink-0 w-8 text-violet-300">智能</span>
-                  <div className="flex flex-wrap gap-1.5 flex-1">
-                    <button title="有参考图时按第一张的原始比例；无参考图则用方形" onClick={() => { setRatio('orig'); setPanel(null) }} className={`px-2 py-1 rounded text-xs ${ratio === 'orig' ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>原比例（随第一张参考图）</button>
+              {/* 图片清晰度 */}
+              {!chatMode && !designMode && (
+                <div className="py-3">
+                  <div className="text-[13px] font-bold text-gray-100 mb-2">图片清晰度 <span className="text-gray-500 font-normal text-[11px]">生成后本地放大，越高越清越慢</span></div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {QUALITIES.map((q) => (
+                      <button key={q.key} onClick={() => setQuality(q.key)} className={`px-3 py-3 rounded-xl border text-center ${q.key === quality ? 'border-brand2 bg-brand2/15' : 'border-edge bg-white/5 hover:bg-white/10'}`}>
+                        <div className={`text-sm font-semibold ${q.key === quality ? 'text-brand2' : 'text-gray-200'}`}>{q.label}</div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">{q.hint}</div>
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
-              {(['竖版', '方形', '横版'] as const).map((g) => (
-                <div key={g} className="flex items-center gap-2 mb-1.5">
-                  <span className={`text-xs font-bold shrink-0 w-8 ${g === '方形' ? 'text-violet-300' : g === '竖版' ? 'text-cyan-300' : 'text-amber-300'}`}>{g}</span>
-                  <div className="flex flex-wrap gap-1.5 flex-1">
-                    {RATIOS.filter((r) => r.group === g).map((r) => {
-                      const ok = ratioSupported(selectedModel, r.key)
-                      return (
-                        <button key={r.key} disabled={!ok} title={ok ? '' : '当前模型不支持该比例'} onClick={() => { if (ok) { setRatio(r.key); setPanel(null) } }} className={`px-2 py-1 rounded text-xs ${!ok ? 'opacity-30 line-through cursor-not-allowed bg-white/5' : r.key === ratio ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>{r.key}</button>
-                      )
-                    })}
+              {/* 参考图 */}
+              {((!chatMode && !designMode && refAllowed) || ((chatMode || designMode) && canRefAny)) && (
+                <div className="py-3">
+                  <div className="text-[13px] font-bold text-gray-100 mb-2">参考图 <span className="text-gray-500 font-normal text-[11px]">最多 8 张，让 AI 参考其风格/构图</span></div>
+                  <div className="flex flex-wrap gap-2">
+                    {refs.length < 8 && (
+                      <button onClick={pickRefs} className="w-16 h-16 rounded-xl border border-dashed border-edge bg-white/[0.03] text-gray-400 hover:bg-white/5 flex flex-col items-center justify-center gap-0.5 text-[11px] shrink-0"><ImagePlus size={18} /> 添加</button>
+                    )}
+                    {refs.map((src, i) => (
+                      <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden border border-edge">
+                        <img src={src} className="w-full h-full object-cover" />
+                        <button onClick={() => setRefs((p) => p.filter((_, j) => j !== i))} className="absolute top-0.5 right-0.5 bg-black/60 rounded-full p-0.5 hover:bg-black"><X size={12} /></button>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-          {!chatMode && !designMode && panel === 'hd' && (
-            <div className="card p-3 mb-2">
-              <div className="text-xs text-gray-400 mb-1.5">画质（生成后本地放大，越高越清越慢）</div>
-              <div className="flex flex-wrap gap-1.5">
-                {QUALITIES.map((q) => (
-                  <button key={q.key} onClick={() => { setQuality(q.key); setPanel(null) }} title={q.hint} className={`px-2.5 py-1 rounded text-xs ${q.key === quality ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>{q.label}</button>
-                ))}
-              </div>
+              )}
+              {/* 基于上一张继续改（开关） */}
+              {!chatMode && !designMode && refAllowed && (
+                <div className="py-3 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[13px] text-gray-100 font-semibold">基于上一张继续改</div>
+                    <div className="text-[11px] text-gray-500 mt-0.5">开启后把上一张生成图作为参考，在它基础上修改</div>
+                  </div>
+                  <button disabled={!lastAssistantImage} onClick={() => setContinueEdit((v) => !v)} className={`shrink-0 w-[46px] h-[26px] rounded-full relative transition-colors disabled:opacity-40 ${continueEdit ? 'bg-brand' : 'bg-white/20'}`}>
+                    <span className={`absolute top-[3px] w-5 h-5 rounded-full bg-white transition-all ${continueEdit ? 'left-[23px]' : 'left-[3px]'}`} />
+                  </button>
+                </div>
+              )}
+              {/* 设计工坊：出图方式 */}
+              {designMode && (
+                <div className="py-3">
+                  <div className="text-[13px] font-bold text-gray-100 mb-2">出图方式</div>
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => { setDesignPreview(true); try { localStorage.setItem('cogpt_design_preview', '1') } catch { /* ignore */ } }} className={`px-2.5 py-1.5 rounded-lg text-xs ${designPreview ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>先预览提示词（可逐条编辑/改数量）</button>
+                    <button onClick={() => { setDesignPreview(false); try { localStorage.setItem('cogpt_design_preview', '0') } catch { /* ignore */ } }} className={`px-2.5 py-1.5 rounded-lg text-xs ${!designPreview ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>直接生成（不预览）</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* 设计工坊：出图方式（折叠面板，开/关状态一目了然，避免分不清是否切换成功） */}
-          {designMode && panel === 'preview' && (
-            <div className="card p-3 mb-2">
-              <div className="text-xs text-gray-400 mb-1.5">设计工坊出图方式</div>
-              <div className="flex flex-wrap gap-1.5">
-                <button onClick={() => { setDesignPreview(true); try { localStorage.setItem('cogpt_design_preview', '1') } catch { /* ignore */ }; setPanel(null) }} className={`px-2.5 py-1 rounded text-xs ${designPreview ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>先预览提示词（可逐条编辑/改数量）</button>
-                <button onClick={() => { setDesignPreview(false); try { localStorage.setItem('cogpt_design_preview', '0') } catch { /* ignore */ }; setPanel(null) }} className={`px-2.5 py-1 rounded text-xs ${!designPreview ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>直接生成（不预览）</button>
-              </div>
-            </div>
-          )}
-
-          {/* 单行控件：对话/生图 + 参考图 + 设置（即梦式，详细项收进「设置」弹层；窗口窄时自动换行） */}
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
+          {/* 输入框上方一行：左=模式段，右=展开/收起参数 + 清空 */}
+          <div className="flex items-center gap-2 mb-2">
             <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
-              <button
-                className={`flex items-center gap-1 px-3 py-1.5 ${!chatMode && !designMode ? 'bg-brand text-white' : 'text-gray-400'}`}
-                onClick={() => { setChatMode(false); setPanel(null) }}
-              >
-                <ImageIcon size={13} /> 生图
-              </button>
-              <button
-                className={`flex items-center gap-1 px-3 py-1.5 ${chatMode ? 'bg-brand text-white' : 'text-gray-400'}`}
-                onClick={() => { setChatMode(true); setPanel(null) }}
-              >
-                <MessageSquareQuote size={13} /> 对话
-              </button>
-              <button
-                className={`flex items-center gap-1 px-3 py-1.5 ${designMode ? 'bg-brand text-white' : 'text-gray-400'}`}
-                onClick={() => { setDesignMode(true); setPanel(null) }}
-              >
-                <ImageIcon size={13} /> 设计工坊
-              </button>
+              <button className={`flex items-center gap-1 px-3 py-1.5 ${!chatMode && !designMode ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setChatMode(false)}><ImageIcon size={13} /> 生图</button>
+              <button className={`flex items-center gap-1 px-3 py-1.5 ${chatMode ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setChatMode(true)}><MessageSquareQuote size={13} /> 对话</button>
+              <button className={`flex items-center gap-1 px-3 py-1.5 ${designMode ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setDesignMode(true)}><ImageIcon size={13} /> 设计工坊</button>
             </div>
-            {((!chatMode && !designMode && refAllowed) || ((chatMode || designMode) && canRefAny)) && (
-              <button className="btn-soft py-1.5 px-2.5 text-xs" onClick={pickRefs}>
-                <ImagePlus size={14} /> 参考图{refs.length ? `(${refs.length})` : ''}
-              </button>
-            )}
-            {!chatMode && !designMode && (
-              <>
-                <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'model' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'model' ? null : 'model')}>
-                  <SlidersHorizontal size={14} /> {isStd ? 'GPT快速文生图' : modelLabel(selectedModel, modelMeta)} ⌄
-                </button>
-                <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'ratio' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'ratio' ? null : 'ratio')}>{ratio === 'orig' ? '原比例' : ratio} ⌄</button>
-                <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'hd' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'hd' ? null : 'hd')}>{QUALITIES.find((q) => q.key === quality)?.label || '标准'} ⌄</button>
-              </>
-            )}
-            {designMode && (
-              <button
-                className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'preview' ? '!bg-brand !text-white !border-brand' : ''}`}
-                onClick={() => setPanel(panel === 'preview' ? null : 'preview')}
-              >
-                {designPreview ? '出图方式：先预览 ⌄' : '出图方式：直接生成 ⌄'}
+            {(!chatMode || canRefAny) && (
+              <button onClick={() => setExpanded((v) => !v)} className={`btn-soft py-1.5 px-3 text-xs ml-auto inline-flex items-center gap-1.5 ${expanded ? '!bg-brand !text-white !border-brand' : ''}`}>
+                <SlidersHorizontal size={14} /> 参数{!expanded && (refs.length > 0 || continueEdit) ? <span className="w-1.5 h-1.5 rounded-full bg-brand2 inline-block" /> : null} {expanded ? '⌃' : '⌄'}
               </button>
             )}
             {messages.length > 0 && (
-              <button
-                onClick={clearChat}
-                disabled={generating || activeGen > 0}
-                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 ml-auto disabled:opacity-40"
-              >
+              <button onClick={clearChat} disabled={generating || activeGen > 0} className={`flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 disabled:opacity-40 ${(!chatMode || canRefAny) ? '' : 'ml-auto'}`}>
                 <Trash2 size={13} /> 清空
               </button>
             )}
@@ -498,6 +494,8 @@ export function ChatView(): JSX.Element {
               placeholder={designMode ? '描述你的设计项目，如：BV×草间弥生 联名海报一套（含主视觉/Logo/产品周边）…' : chatMode ? '说说你想要的图，我帮你聊清楚（想好了回复「生成」即可出图）…' : '描述你想要的图片；也可拖入/粘贴图片作为参考图…'}
               value={text}
               onChange={(e) => setText(e.target.value)}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
               onPaste={async (e) => {
                 const imgs = await extractImages(e.clipboardData)
                 if (imgs.length) {

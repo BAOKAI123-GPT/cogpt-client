@@ -120,7 +120,7 @@ export const api = {
     status: number
     // fallback：所选模型繁忙失败、后端自动用「极速」模型补出了这张图；fallbackModel：实际出图的模型 id。
     // approx：带参考图失败时，按图片描述生成的「近似图」（非精确改图）。
-    data: { ok?: boolean; images?: string[]; text?: string; quota?: Quota; error?: string; needRecharge?: boolean; fallback?: boolean; fallbackModel?: string; approx?: boolean }
+    data: { ok?: boolean; images?: string[]; text?: string; quota?: Quota; error?: string; needRecharge?: boolean; fallback?: boolean; fallbackModel?: string; approx?: boolean; contentReject?: boolean }
   }> => req('/api/generate', { method: 'POST', body: JSON.stringify(body), signal }),
   payCreate: (
     tier: string
