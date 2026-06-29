@@ -87,13 +87,14 @@ export function ChatView(): JSX.Element {
   const replanDesign = useApp((s) => s.replanDesign)
   const canAbort = useApp((s) => s.canAbort)
   const abortGenerate = useApp((s) => s.abortGenerate)
+  const abortOne = useApp((s) => s.abortOne)
   const pendingRefs = useApp((s) => s.pendingRefs)
   const clearPendingRefs = useApp((s) => s.clearPendingRefs)
 
   const [text, setText] = useState('')
   const [continueEdit, setContinueEdit] = useState(false)
   const [refs, setRefs] = useState<string[]>([])
-  const [ratio, setRatio] = useState(DEFAULT_RATIO)
+  const [ratio, setRatio] = useState('orig') // 默认「原比例」(智能)：有参考图按其原比例，无参考图回退方形
   const [quality, setQuality] = useState(DEFAULT_QUALITY)
   const [dragOver, setDragOver] = useState(false)
   const [designPreview, setDesignPreview] = useState<boolean>(() => { try { return localStorage.getItem('cogpt_design_preview') !== '0' } catch { return true } })
@@ -169,10 +170,6 @@ export function ChatView(): JSX.Element {
   useEffect(() => {
     if (selectedModel && !ratioSupported(selectedModel, ratio)) setRatio(DEFAULT_RATIO)
   }, [selectedModel, ratio])
-  // 「原比例」需要参考图；参考图清空后回退默认比例，避免无参考图却选着原比例
-  useEffect(() => {
-    if (ratio === 'orig' && refs.length === 0) setRatio(DEFAULT_RATIO)
-  }, [ratio, refs.length])
 
   // 生图模式下，标准档（不支持参考图的模型）清掉参考图；对话/设计模式保留（会自动用支持参考图的模型）
   useEffect(() => {
@@ -210,7 +207,9 @@ export function ChatView(): JSX.Element {
       ...(continueEdit && lastAssistantImage ? [lastAssistantImage] : []),
       ...refs
     ]
-    // 生图模式发送后不清空提示词/参考图：可连点发送，同时生最多 3 张（配「原比例」对同一参考图连出 3 个变体）。需换内容时手动改即可。
+    // 发送后清空输入与参考图：明确"已发出"，避免误以为没发而连点重复(每张生成各自带中止，可单独结束)。
+    setText('')
+    setRefs([])
     await generate(p, {
       initImages: initImages.length ? initImages : undefined,
       ratioKey: ratio,
@@ -321,6 +320,8 @@ export function ChatView(): JSX.Element {
               ) : (
                 <DesignCardDesktop key={i} msg={m} generating={generating || activeGen > 0} per={modelMeta[qModels[0]]?.credits || 10} onGenerate={genDesign} onReplan={replanDesign} />
               )
+            ) : m.pending ? (
+              <div key={i} className="mb-3"><ProgressCard status={m.note || '正在生成…'} onAbort={() => abortOne(m.genReqId || '')} /></div>
             ) : (
               <Bubble
                 key={i}
@@ -335,7 +336,8 @@ export function ChatView(): JSX.Element {
             )
           )}
 
-          {(generating || activeGen > 0) && <ProgressCard status={generating ? genStatus : `${activeGen} 张正在生成中…（可继续创建，最多 ${MAX_CONCURRENT} 张同时）`} onAbort={(generating ? canAbort : true) ? abortGenerate : undefined} />}
+          {/* 设计批量/聊天用全局进度卡；普通生图每张已各自占位(不重复计数) */}
+          {(() => { const extra = activeGen - messages.filter((m) => m.pending).length; return (generating || extra > 0) && <ProgressCard status={generating ? genStatus : `${extra} 张正在生成中…（可继续创建，最多 ${MAX_CONCURRENT} 张同时）`} onAbort={(generating ? canAbort : true) ? abortGenerate : undefined} /> })()}
         </div>
       </div>
 
@@ -394,7 +396,7 @@ export function ChatView(): JSX.Element {
                 <div className="flex items-center gap-2 mb-1.5">
                   <span className="text-xs font-bold shrink-0 w-8 text-violet-300">智能</span>
                   <div className="flex flex-wrap gap-1.5 flex-1">
-                    <button disabled={refs.length === 0} title={refs.length === 0 ? '先添加参考图' : ''} onClick={() => { if (refs.length) { setRatio('orig'); setPanel(null) } }} className={`px-2 py-1 rounded text-xs ${refs.length === 0 ? 'opacity-30 cursor-not-allowed bg-white/5' : ratio === 'orig' ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>原比例（随第一张参考图）</button>
+                    <button title="有参考图时按第一张的原始比例；无参考图则用方形" onClick={() => { setRatio('orig'); setPanel(null) }} className={`px-2 py-1 rounded text-xs ${ratio === 'orig' ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>原比例（随第一张参考图）</button>
                   </div>
                 </div>
               )}

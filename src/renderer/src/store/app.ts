@@ -213,6 +213,7 @@ interface AppStore {
 
   canAbort: boolean // 生图进行中、可中止
   abortGenerate: () => void
+  abortOne: (reqId: string) => void
 }
 
 let genAC: AbortController | null = null // 设计工坊整批的中止控制器
@@ -253,7 +254,10 @@ export const useApp = create<AppStore>((set, get) => ({
     const { messages, convId } = get()
     if (!messages.length) return
     const title = (messages.find((m) => m.role === 'user')?.content || '新对话').slice(0, 24)
-    await convSave({ id: convId, title, at: Date.now(), msgs: messages })
+    // 不持久化「生成中」占位：避免重载后留下永远转圈的占位条
+    const msgs = messages.filter((m) => !m.pending)
+    if (!msgs.length) return
+    await convSave({ id: convId, title, at: Date.now(), msgs })
     set({ convList: await convMetas() })
   },
   async newConversation() {
@@ -433,7 +437,10 @@ export const useApp = create<AppStore>((set, get) => ({
     const ac = new AbortController()
     const reqId = crypto.randomUUID()
     genJobs.set(reqId, () => { void api.cancelGenerate(reqId); ac.abort() })
-    set((s) => ({ messages: [...s.messages, userMsg], activeGen: s.activeGen + 1 }))
+    // 每张生成各自占位(带独立中止)，落在那条请求下面；多张并发可单独中止其中一两张。
+    set((s) => ({ messages: [...s.messages, userMsg, { role: 'assistant', pending: true, genReqId: reqId, content: '' }], activeGen: s.activeGen + 1 }))
+    // 用 genReqId 把结果/错误替换回该次生成的占位条(多张并发各归各位)。
+    const rep = (m: ChatMessage): void => set((s) => ({ messages: s.messages.map((x) => (x.genReqId === reqId ? m : x)) }))
     try {
       const size = ratioKey === 'orig' ? await resolveOrigSize(refImages[0]) : ratioKey ? modelSizeFor(ratioKey) : undefined
       const hdEdge = opts?.qualityKey ? qualityLongEdge(opts.qualityKey) : undefined
@@ -474,22 +481,23 @@ export const useApp = create<AppStore>((set, get) => ({
       }
       // 用户中止：未出图不计费；刷新额度如实显示
       if (ac.signal.aborted) {
-        set((s) => ({ messages: [...s.messages, { role: 'assistant', content: '已中止生成（未出图，不计费）' }] }))
+        rep({ role: 'assistant', content: '已中止生成（未出图，不计费）' })
         await get().refreshMe()
         return
       }
-      if (busyMsg) { set((s) => ({ messages: [...s.messages, { role: 'assistant', content: `${busyMsg}` }] })); return }
+      if (busyMsg) { rep({ role: 'assistant', content: `${busyMsg}` }); return }
       if (res && (res.status === 402 || res.data?.needRecharge)) {
-        set((s) => ({ messages: [...s.messages, { role: 'assistant', content: '额度已用完，请开通或升级会员后再试。' }], needRecharge: true }))
+        rep({ role: 'assistant', content: '额度已用完，请开通或升级会员后再试。' })
+        set({ needRecharge: true })
         return
       }
-      if (res && res.status === 400) { set((s) => ({ messages: [...s.messages, { role: 'assistant', content: `${res.data?.error ?? '请求有误，请修改后重试'}` }] })); return }
+      if (res && res.status === 400) { rep({ role: 'assistant', content: `${res.data?.error ?? '请求有误，请修改后重试'}` }); return }
       const success = !!(res && res.ok && res.data.images && res.data.images.length)
       if (!success) {
         // 问题一：网络/超时类失败——这张可能已在后台生成完成(进云作品库且已扣额度)，提示去云库查看并刷新额度；确定性失败保留原文案。
         const networky = !res && /网络|超时|timeout/i.test(lastErr)
         const msg = networky ? '网络不稳定，这张可能已在后台生成完成——请到「云作品库」查看；若没有再点重新生成。' : `${res?.data?.error || lastErr}`
-        set((s) => ({ messages: [...s.messages, { role: 'assistant', content: msg, retry: opts?.mask ? undefined : { kind: 'gen', prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey, model } }] }))
+        rep({ role: 'assistant', content: msg, retry: opts?.mask ? undefined : { kind: 'gen', prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey, model } })
         void get().refreshMe()
         return
       }
@@ -504,7 +512,8 @@ export const useApp = create<AppStore>((set, get) => ({
       const note = res!.data.fallback ? (res!.data.approx ? '参考图通道繁忙，已根据图片描述生成「近似图」（非精确改图，仅供参考）' : '高质量模型当前繁忙，已用「极速」模型为你生成（风格可能略有不同）') : undefined
       const assistant: ChatMessage = { role: 'assistant', content: res!.data.text ?? '', images, note, src: { prompt: trimmed, refs: refImages.length ? refImages : undefined, ratio: ratioKey } }
       const quota = res!.data.quota
-      set((s) => { const p: Partial<AppStore> = { messages: [...s.messages, assistant] }; if (quota && s.account) p.account = { ...s.account, quota }; return p })
+      rep(assistant)
+      if (quota) set((s) => (s.account ? { account: { ...s.account, quota } } : {}))
       void get().persistConv()
     } finally {
       set((s) => ({ activeGen: Math.max(0, s.activeGen - 1) }))
@@ -622,6 +631,7 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
   abortGenerate: () => { genJobs.forEach((fn) => fn()); genAC?.abort() },
+  abortOne: (reqId) => { genJobs.get(reqId)?.() }, // 单独中止某一张并发生成
 
   // 局部重绘结果同步进聊天框，保存记录
   addAssistantImage: (dataUrl) => {

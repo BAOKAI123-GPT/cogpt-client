@@ -17,6 +17,9 @@ export interface ChatMessage {
   brief?: string
   /** 需求1：失败消息携带重生该项所需参数，供失败气泡「重新生成」原位重生 */
   retry?: { kind: 'gen' | 'design'; prompt: string; refs?: string[]; ratio?: string; model?: string }
+  /** 并发生图：该条是"生成中"占位（带独立中止）；genReqId 用于结果替换与单独中止 */
+  pending?: boolean
+  genReqId?: string
 }
 
 export interface AppSettings {
