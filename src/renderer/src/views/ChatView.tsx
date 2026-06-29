@@ -169,6 +169,10 @@ export function ChatView(): JSX.Element {
   useEffect(() => {
     if (selectedModel && !ratioSupported(selectedModel, ratio)) setRatio(DEFAULT_RATIO)
   }, [selectedModel, ratio])
+  // 「原比例」需要参考图；参考图清空后回退默认比例，避免无参考图却选着原比例
+  useEffect(() => {
+    if (ratio === 'orig' && refs.length === 0) setRatio(DEFAULT_RATIO)
+  }, [ratio, refs.length])
 
   // 生图模式下，标准档（不支持参考图的模型）清掉参考图；对话/设计模式保留（会自动用支持参考图的模型）
   useEffect(() => {
@@ -206,8 +210,7 @@ export function ChatView(): JSX.Element {
       ...(continueEdit && lastAssistantImage ? [lastAssistantImage] : []),
       ...refs
     ]
-    setText('')
-    setRefs([])
+    // 生图模式发送后不清空提示词/参考图：可连点发送，同时生最多 3 张（配「原比例」对同一参考图连出 3 个变体）。需换内容时手动改即可。
     await generate(p, {
       initImages: initImages.length ? initImages : undefined,
       ratioKey: ratio,
@@ -387,6 +390,14 @@ export function ChatView(): JSX.Element {
           {!chatMode && !designMode && panel === 'ratio' && (
             <div className="card p-3 mb-2">
               <div className="text-xs text-gray-400 mb-1.5">画面比例{!modelSupportsAnyRatio(selectedModel) && (<span className="text-amber-300/80 font-normal"> （{modelLabel(selectedModel, modelMeta)} 仅 3 比例，9:16 等请切高质量）</span>)}</div>
+              {modelSupportsAnyRatio(selectedModel) && (
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-xs font-bold shrink-0 w-8 text-violet-300">智能</span>
+                  <div className="flex flex-wrap gap-1.5 flex-1">
+                    <button disabled={refs.length === 0} title={refs.length === 0 ? '先添加参考图' : ''} onClick={() => { if (refs.length) { setRatio('orig'); setPanel(null) } }} className={`px-2 py-1 rounded text-xs ${refs.length === 0 ? 'opacity-30 cursor-not-allowed bg-white/5' : ratio === 'orig' ? 'bg-brand text-white' : 'bg-white/5 hover:bg-white/10'}`}>原比例（随第一张参考图）</button>
+                  </div>
+                </div>
+              )}
               {(['竖版', '方形', '横版'] as const).map((g) => (
                 <div key={g} className="flex items-center gap-2 mb-1.5">
                   <span className={`text-xs font-bold shrink-0 w-8 ${g === '方形' ? 'text-violet-300' : g === '竖版' ? 'text-cyan-300' : 'text-amber-300'}`}>{g}</span>
@@ -456,7 +467,7 @@ export function ChatView(): JSX.Element {
                 <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'model' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'model' ? null : 'model')}>
                   <SlidersHorizontal size={14} /> {isStd ? 'GPT快速文生图' : modelLabel(selectedModel, modelMeta)} ⌄
                 </button>
-                <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'ratio' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'ratio' ? null : 'ratio')}>{ratio} ⌄</button>
+                <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'ratio' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'ratio' ? null : 'ratio')}>{ratio === 'orig' ? '原比例' : ratio} ⌄</button>
                 <button className={`btn-soft py-1.5 px-2.5 text-xs ${panel === 'hd' ? '!bg-brand !text-white !border-brand' : ''}`} onClick={() => setPanel(panel === 'hd' ? null : 'hd')}>{QUALITIES.find((q) => q.key === quality)?.label || '标准'} ⌄</button>
               </>
             )}

@@ -74,6 +74,23 @@ export function modelSizeFor(ratioKey: string): string {
   return ratioByKey(ratioKey).size
 }
 
+/** 「原比例」：取与给定宽高比最接近的支持预设 key（gpt-image 仅接受固定尺寸，取最近预设最稳）。 */
+export function nearestRatioKey(w: number, h: number): string {
+  if (!w || !h) return DEFAULT_RATIO
+  const target = w / h
+  let best = DEFAULT_RATIO
+  let bestDiff = Infinity
+  for (const r of RATIOS) {
+    const [rw, rh] = r.size.split('x').map(Number)
+    const diff = Math.abs(rw / rh - target)
+    if (diff < bestDiff) {
+      bestDiff = diff
+      best = r.key
+    }
+  }
+  return best
+}
+
 /** 画质对应的长边像素（本地等比放大用，不裁切；也作为 /api/generate 的 hdEdge 传给后端计高清加点） */
 export function qualityLongEdge(qualityKey: string): number {
   return qualityByKey(qualityKey).longEdge

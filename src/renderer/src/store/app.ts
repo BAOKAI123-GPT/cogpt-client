@@ -1,7 +1,23 @@
 import { create } from 'zustand'
 import type { AppSettings, ChatMessage } from '@shared/types'
 import { api, setToken, getToken, type Quota, type ModelMeta, type ModelMetaItem, type Pricing } from '../lib/api'
-import { modelSizeFor, qualityLongEdge, ratioSupported, DEFAULT_RATIO } from '../lib/genOptions'
+import { modelSizeFor, qualityLongEdge, ratioSupported, DEFAULT_RATIO, nearestRatioKey } from '../lib/genOptions'
+
+// 「原比例」：按第一张参考图的原始宽高比取最近预设尺寸；无参考图/读取失败回退默认比例。
+async function resolveOrigSize(first?: string): Promise<string> {
+  if (!first) return modelSizeFor(DEFAULT_RATIO)
+  try {
+    const dim = await new Promise<{ w: number; h: number }>((res, rej) => {
+      const im = new Image()
+      im.onload = () => res({ w: im.naturalWidth, h: im.naturalHeight })
+      im.onerror = rej
+      im.src = first
+    })
+    return modelSizeFor(nearestRatioKey(dim.w, dim.h))
+  } catch {
+    return modelSizeFor(DEFAULT_RATIO)
+  }
+}
 
 export type Tier = 'standard' | 'quality'
 const DEFAULT_META: ModelMetaItem = { mode: 'quality', credits: 1, ref: true }
@@ -419,7 +435,7 @@ export const useApp = create<AppStore>((set, get) => ({
     genJobs.set(reqId, () => { void api.cancelGenerate(reqId); ac.abort() })
     set((s) => ({ messages: [...s.messages, userMsg], activeGen: s.activeGen + 1 }))
     try {
-      const size = ratioKey ? modelSizeFor(ratioKey) : undefined
+      const size = ratioKey === 'orig' ? await resolveOrigSize(refImages[0]) : ratioKey ? modelSizeFor(ratioKey) : undefined
       const hdEdge = opts?.qualityKey ? qualityLongEdge(opts.qualityKey) : undefined
       const reqBody = {
         prompt: trimmed, size, model,
