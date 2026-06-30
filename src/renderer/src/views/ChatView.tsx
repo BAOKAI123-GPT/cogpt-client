@@ -110,7 +110,6 @@ export function ChatView(): JSX.Element {
 
   // —— 即梦式两档：标准(扁平/便宜/无参考图/锁3画幅) / 高质量(可切 GPT·Nano、参考图、全比例) ——
   const curMeta = modelMeta[selectedModel] || { mode: 'quality', credits: 1, ref: true }
-  const isStd = curMeta.mode === 'standard'
   const refAllowed = !!curMeta.ref
   const canRefAny = models.some((m) => modelMeta[m]?.ref) // 是否存在支持参考图的模型（对话模式据此显示参考图入口）
   // 高质量档下的可选模型（GPT / Nano Banana 等）
@@ -352,20 +351,14 @@ export function ChatView(): JSX.Element {
           {/* 展开后：一个统一参数容器，所有控件纵向分行（现有参数全保留：模型/比例/清晰度/参考图/基于上一张/设计出图方式） */}
           {expanded && (
             <div className="card p-4 mb-3 max-h-[56vh] overflow-y-auto divide-y divide-edge">
-              {/* 模型 */}
+              {/* 模型：所有可用模型平铺成卡片，直接点选（含 Nano Banana / 极速 等） */}
               {!chatMode && !designMode && (
                 <div className="py-3">
-                  <div className="flex items-center gap-2 flex-wrap mb-2">
-                    <span className="text-[13px] font-bold text-gray-100">模型</span>
-                    <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs ml-auto">
-                      <button className={`px-3 py-1.5 whitespace-nowrap ${isStd ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setTier('standard')}>GPT快速文生图</button>
-                      <button className={`px-3 py-1.5 whitespace-nowrap ${!isStd ? 'bg-brand text-white' : 'text-gray-400'}`} onClick={() => setTier('quality')}>高质量GPT image2</button>
-                    </div>
-                  </div>
-                  <div className="text-[11px] text-gray-500 mb-2">本次{hasExtra ? '约扣' : '扣'} <b className="text-gray-300">{estPoints}</b> 点{isStd ? '（通用 3 比例）' : '（可换模型 / 参考图 / 全比例；多张参考图、超清额外计点）'}</div>
-                  {!isStd && qModels.length > 1 && (
+                  <div className="text-[13px] font-bold text-gray-100 mb-2">模型</div>
+                  <div className="text-[11px] text-gray-500 mb-2">本次{hasExtra ? '约扣' : '扣'} <b className="text-gray-300">{estPoints}</b> 点{refAllowed ? '（支持参考图 / 全比例；多张参考图、超清额外计点）' : '（该模型仅文字生图，不支持参考图）'}</div>
+                  {models.length > 0 && (
                     <div className="flex gap-2.5 overflow-x-auto pb-1.5">
-                      {qModels.map((m) => (
+                      {models.map((m) => (
                         <button key={m} onClick={() => setSelectedModel(m)} className="shrink-0 w-20 flex flex-col items-center gap-1.5">
                           <span className={`relative w-20 h-20 rounded-2xl overflow-hidden border ${m === selectedModel ? 'border-brand2 ring-2 ring-brand2' : 'border-edge'}`}>
                             <ModelArt seed={m} className="w-full h-full block" />
