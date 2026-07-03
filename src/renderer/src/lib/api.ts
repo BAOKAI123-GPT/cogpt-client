@@ -9,12 +9,20 @@ export function getToken(): string | null {
   return token
 }
 
-async function req(path: string, opts: RequestInit = {}): Promise<any> {
+async function req(path: string, opts: RequestInit = {}, timeoutMs = 60000): Promise<any> {
   const headers: Record<string, string> = { 'content-type': 'application/json', ...(opts.headers as any) }
   if (token) headers['authorization'] = `Bearer ${token}`
-  const r = await fetch(BASE + path, { ...opts, headers })
-  const data = await r.json().catch(() => ({}))
-  return { ok: r.ok, status: r.status, data }
+  // 超时护栏：请求超过 timeoutMs 未响应就中止（抛错→上层 catch 成 status:0，交给提交重试兜底），避免经 Cloudflare 高峰挂死。
+  // 与外部中止信号(用户点中止)合并。提交(/api/generate)带参考图上传慢，调用方会传更长的 timeoutMs。
+  const to = new AbortController()
+  const timer = setTimeout(() => to.abort(), timeoutMs)
+  const ext = opts.signal as AbortSignal | undefined
+  if (ext) { if (ext.aborted) to.abort(); else ext.addEventListener('abort', () => to.abort(), { once: true }) }
+  try {
+    const r = await fetch(BASE + path, { ...opts, headers, signal: to.signal })
+    const data = await r.json().catch(() => ({}))
+    return { ok: r.ok, status: r.status, data }
+  } finally { clearTimeout(timer) }
 }
 
 // 每个模型的元信息：档位(standard/quality)、本次扣点数、是否支持参考图。
@@ -121,7 +129,12 @@ export const api = {
     // fallback：所选模型繁忙失败、后端自动用「极速」模型补出了这张图；fallbackModel：实际出图的模型 id。
     // approx：带参考图失败时，按图片描述生成的「近似图」（非精确改图）。
     data: { ok?: boolean; images?: string[]; text?: string; quota?: Quota; error?: string; needRecharge?: boolean; fallback?: boolean; fallbackModel?: string; approx?: boolean; contentReject?: boolean }
-  }> => req('/api/generate', { method: 'POST', body: JSON.stringify(body), signal }),
+    // 提交超时给足 150s：带参考图/蒙版的提交要先把图上传经 Cloudflare→国内，高峰/慢网下上传本就要 60–100s+，默认 60s 会把「慢但能成」的提交掐成失败。
+  }> => req('/api/generate', { method: 'POST', body: JSON.stringify(body), signal }, 150000),
+  // 客户端「提交失败」上报：这类失败(请求没进后台队列，如经 Cloudflare 5xx/超时)服务端不产生 GenLog，上报后后台「生图日志」才可见。fire-and-forget。
+  genError: (model: string, error: string, ms?: number): void => {
+    void req('/api/gen-error', { method: 'POST', body: JSON.stringify({ model, error, ms }) }).catch(() => {})
+  },
   payCreate: (
     tier: string
   ): Promise<{

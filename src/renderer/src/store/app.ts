@@ -28,6 +28,33 @@ const waitAbortable = (ms: number, signal?: AbortSignal): Promise<void> => new P
   signal?.addEventListener('abort', () => { clearTimeout(t); res() }, { once: true })
 })
 
+// 生图「提交」带幂等重试（与网页 submitGen 对齐）：提交遇网络失败(status:0)或 5xx(常见于经 Cloudflare 高峰抖动)、
+// 或全站总闸排队(429 queued)时，用同一 reqId 自动重试。服务端按 reqId 幂等去重(submitJob)——重试不会重复出图/重复扣费。
+async function submitGen(
+  body: Parameters<typeof api.generate>[0],
+  signal: AbortSignal,
+  onQueued?: () => void
+): Promise<Awaited<ReturnType<typeof api.generate>>> {
+  type R = Awaited<ReturnType<typeof api.generate>>
+  const call = async (): Promise<R> => {
+    try { return await api.generate(body, signal) } catch { return { ok: false, status: 0, data: { error: '网络异常' } } as R }
+  }
+  let r = await call()
+  let netTries = 0
+  for (let i = 0; i < 6 && !signal.aborted; i++) {
+    const netFail = r.status === 0 || r.status >= 500
+    const queued = r.status === 429 && (r.data as { queued?: boolean })?.queued // 全站总闸：排队中，等空位再试
+    let wait = 0
+    if (queued) { wait = Math.min(2000 * (i + 1), 6000); onQueued?.() }
+    else if (netFail && netTries < 2) { netTries++; wait = 1500 * netTries }
+    else break
+    await waitAbortable(wait, signal)
+    if (signal.aborted) break
+    r = await call()
+  }
+  return r
+}
+
 // 单张异步生成（提交→轮询），供设计工坊逐张生成复用。reqBody.reqId 必填。
 async function genOneJob(
   reqBody: { prompt: string; model: string; size?: string; reqId: string; initImages?: string[] },
@@ -35,18 +62,14 @@ async function genOneJob(
 ): Promise<{ img?: string; quota?: Quota; err?: string; needRecharge?: boolean }> {
   // 问题二A/B：中止时通知后端取消该后台任务，释放并发槽、杜绝幽灵继续跑并扣费(并发池下每张各自 reqId)。
   ac.signal.addEventListener('abort', () => { void api.cancelGenerate(reqBody.reqId) }, { once: true })
-  let sub: Awaited<ReturnType<typeof api.generate>>
-  try {
-    // noFallback：设计批量是精确任务，某张失败就如实失败(不扣费、可重生成)，不静默换兜底模型补近似图还扣费。
-    sub = await api.generate({ ...reqBody, async: true, noFallback: true }, ac.signal)
-  } catch {
-    return { err: '网络异常' }
-  }
+  // noFallback：设计批量是精确任务，某张失败就如实失败(不扣费、可重生成)，不静默换兜底模型补近似图还扣费。
+  // submitGen：提交遇网络/5xx/排队自动用同一 reqId 重试(幂等，不重复出图/扣费)。
+  const sub = await submitGen({ ...reqBody, async: true, noFallback: true }, ac.signal)
   if (ac.signal.aborted) return { err: 'aborted' }
   if (sub.status === 402 || sub.data?.needRecharge) return { err: '点数不足', needRecharge: true }
   if (sub.status === 429) return { err: sub.data?.error || '繁忙，请稍后' }
   if (sub.status === 200 && sub.data?.images?.length) return { img: sub.data.images[0], quota: sub.data.quota }
-  if (!(sub.status === 202 || (sub.data as { accepted?: boolean })?.accepted)) return { err: sub.data?.error || '提交失败' }
+  if (!(sub.status === 202 || (sub.data as { accepted?: boolean })?.accepted)) { api.genError(reqBody.model, sub.data?.error || `提交失败(HTTP ${sub.status})`); return { err: sub.data?.error || '提交失败' } }
   const t0 = Date.now()
   while (!ac.signal.aborted && Date.now() - t0 < 315_000) {
     await waitAbortable(3000, ac.signal)
@@ -455,16 +478,15 @@ export const useApp = create<AppStore>((set, get) => ({
       let res: GenRes | null = null
       let lastErr = '生成失败，请稍后再试'
       let busyMsg = ''
-      let sub: GenRes
-      try {
-        sub = await api.generate({ ...reqBody, async: true }, ac.signal)
-      } catch {
-        sub = { ok: false, status: 0, data: { error: '网络异常，无法连接服务器' } } as GenRes
-      }
+      // 占位条进度文案更新器（ProgressCard 显示 m.note）
+      const setNote = (n: string): void => set((s) => ({ messages: s.messages.map((x) => (x.genReqId === reqId && x.pending ? { ...x, note: n } : x)) }))
+      // submitGen：提交遇网络/5xx/排队自动用同一 reqId 重试(幂等，不重复出图/扣费)；排队时更新占位文案。
+      const sub: GenRes = await submitGen({ ...reqBody, async: true }, ac.signal, () => setNote('⏳ 当前高峰，排队中…有空位马上为你生成'))
       if (!ac.signal.aborted) {
         if (sub.status === 429) busyMsg = sub.data?.error || '当前同时生成的张数已达上限，请等其中一张完成再试'
         else if (sub.status === 200 && sub.data?.images?.length) res = sub
         else if (sub.status === 202 || (sub.data as { accepted?: boolean })?.accepted) {
+          setNote('正在生成…') // 已拿到空位，复位排队文案
           const t0 = Date.now()
           while (!ac.signal.aborted && Date.now() - t0 < 315_000) {
             await waitAbortable(3000, ac.signal)
@@ -477,7 +499,7 @@ export const useApp = create<AppStore>((set, get) => ({
             if (state === 'missing') { lastErr = '生成任务已丢失，请重试'; break }
           }
           if (!res && !ac.signal.aborted && lastErr === '生成失败，请稍后再试') lastErr = '生成超时了，请重试或换个模型'
-        } else lastErr = sub.data?.error || lastErr
+        } else { lastErr = sub.data?.error || lastErr; api.genError(model, `提交失败(HTTP ${sub.status})：${lastErr}`) } // 提交未进队列(如经 CF 5xx)——服务端无 GenLog，客户端上报以便后台可见
       }
       // 用户中止：未出图不计费；刷新额度如实显示
       if (ac.signal.aborted) {
